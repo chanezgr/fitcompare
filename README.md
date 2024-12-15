@@ -60,16 +60,16 @@ Example:
 In addition to command line, options can be configured in the project.yaml in the same directory.
 After each successful run, a new project.yaml.example is generated with example values
 
-`project: # This is a section that configure global aspects of the project
-  align: True/False # True is the default value, the one to compare two files generated at the same time. False is to compare differetn files from different time. For information only, cannot be a valid data processing, because fake data are added to the shorter file.
-  zoom: [90, 120] # Zoom between two timestamps (relative seconds of activity)
-  altitudeGap: 8  # Number of seconds ignored at the beginning of activity, if some files start at 0 altitude and then put the correct one.
-  map: True/False # If a map should be generated. It is mandatory to put a map: False for activities without GPS data
-  graphs: ['heart_rate', 'altitude', 'distance'] # Fields for which a graph shoud be generated
-  includeSmoothedAlt: False # Should the data of smoothed altitude be included into the elevation graph
+`project: # This is a section that configure global aspects of the project`
+  `align: True/False # True is the default value, the one to compare two files generated at the same time. False is to compare differetn files from different time. For information only, cannot be a valid data processing, because fake data are added to the shorter file.`
+  `zoom: [90, 120] # Zoom between two timestamps (relative seconds of activity)`
+  `altitudeGap: 8  # Number of seconds ignored at the beginning of activity, if some files start at 0 altitude and then put the correct one.`
+  `map: True/False # If a map should be generated. It is mandatory to put a map: False for activities without GPS data`
+  `graphs: ['heart_rate', 'altitude', 'distance'] # Fields for which a graph shoud be generated`
+  `includeSmoothedAlt: False # Should the data of smoothed altitude be included into the elevation graph`
   
-customGraphs: # In this section, we can configure custom graphs
-  - name: Altitude baro vs GPS # Name of the custom graph
+`customGraphs: # In this section, we can configure custom graphs`
+  `- name: Altitude baro vs GPS # Name of the custom graph
     values: # Values
       - file: GarminFenix8_WahooTRACKR_GNSSDual.fit # Fit file with the data field
         field: enhanced_altitude # data field to include in the customer graph
