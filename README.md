@@ -3,12 +3,12 @@ Python tool to compare two FIT files data
 
 This script is only intended to run in a docker image. Any other use is not supported.
 
-=Build the Docker image=
+## Build the Docker image
 1. Get the file fitcompare.py, Dockerfile and config.ini, place all the files in a directory
 2. Create a Mapbox API and put it in the config.ini file
 3. Build the Docker image using: docker build . -t fitcompare
 
-=Run the container=
+## Run the container=
 The long command to run the container is:
 docker run -v .:/project fitcompare OPTIONS
 
@@ -18,7 +18,7 @@ alias fitcompare="docker run -v .:/project fitcompare"
 
 This way, I can run only "fitcompare OPTIONS" in the directory where FIT files are 
 
-Command line usage: 
+## Command line usage
 
 usage: fitcompare [-h] [--reference-file REFERENCE_FILE]
                      [--prefix PROJECT_PREFIX] [--debug] [--export]
@@ -35,6 +35,8 @@ options:
                         Set the project prefix for output files (fully operational)
   --debug, -d           Enable debug (partly operational)
   --export, -e          Export graphs values also as CSV (partly operational)
+
+## Name of the FIT files
   
 FIT File name have to be correctly formatted:
 
@@ -53,7 +55,10 @@ Example:
 
 fitcompare -r SuuntoRace_PolarH10_GNSSDual_Stryd.fit GarminFenix9_OHR_GNSSDual.fit GarmninInstinct4_OHR_GNSSDual.fit -p compare_prototypes
 
-In addition to command line, options can be configured in the project.yaml in the same directory:
+## Configuration YAML file
+
+In addition to command line, options can be configured in the project.yaml in the same directory.
+After each successful run, a new project.yaml.example is generated with example values
 
 project: # This is a section that configure global aspects of the project
   align: True/False # True is the default value, the one to compare two files generated at the same time. False is to compare differetn files from different time. For information only, cannot be a valid data processing, because fake data are added to the shorter file.
