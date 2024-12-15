@@ -20,21 +20,22 @@ This way, I can run only "fitcompare OPTIONS" in the directory where FIT files a
 
 ## Command line usage
 
-`usage: fitcompare [-h] [--reference-file REFERENCE_FILE]
+```usage: fitcompare [-h] [--reference-file REFERENCE_FILE]
                      [--prefix PROJECT_PREFIX] [--debug] [--export]
-                     FITFILE [FITFILE ...]`
+                     FITFILE [FITFILE ...]
                      
 positional arguments:
-  `FITFILE               Fit Files to compare`
+  FITFILE               Fit Files to compare
 
 options:
-  `-h, --help            show this help message and exit (fully operational)
+  -h, --help            show this help message and exit (fully operational)
   --reference-file, -r REFERENCE_FILE
                         Set the reference FIT File (fully operational)
   --prefix, -p PROJECT_PREFIX
                         Set the project prefix for output files (fully operational)
   --debug, -d           Enable debug (partly operational)
-  --export, -e          Export graphs values also as CSV (partly operational)`
+  --export, -e          Export graphs values also as CSV (partly operational)
+```
 
 ## Name of the FIT files
   
@@ -60,16 +61,17 @@ Example:
 In addition to command line, options can be configured in the project.yaml in the same directory.
 After each successful run, a new project.yaml.example is generated with example values
 
-`project: # This is a section that configure global aspects of the project`
-  `align: True/False # True is the default value, the one to compare two files generated at the same time. False is to compare differetn files from different time. For information only, cannot be a valid data processing, because fake data are added to the shorter file.`
-  `zoom: [90, 120] # Zoom between two timestamps (relative seconds of activity)`
-  `altitudeGap: 8  # Number of seconds ignored at the beginning of activity, if some files start at 0 altitude and then put the correct one.`
-  `map: True/False # If a map should be generated. It is mandatory to put a map: False for activities without GPS data`
-  `graphs: ['heart_rate', 'altitude', 'distance'] # Fields for which a graph shoud be generated`
-  `includeSmoothedAlt: False # Should the data of smoothed altitude be included into the elevation graph`
+```
+project: # This is a section that configure global aspects of the project
+  align: True/False # True is the default value, the one to compare two files generated at the same time. False is to compare differetn files from different time. For information only, cannot be a valid data processing, because fake data are added to the shorter file.
+  zoom: [90, 120] # Zoom between two timestamps (relative seconds of activity)
+  altitudeGap: 8  # Number of seconds ignored at the beginning of activity, if some files start at 0 altitude and then put the correct one.
+  map: True/False # If a map should be generated. It is mandatory to put a map: False for activities without GPS data
+  graphs: ['heart_rate', 'altitude', 'distance'] # Fields for which a graph shoud be generated
+  includeSmoothedAlt: False # Should the data of smoothed altitude be included into the elevation graph
   
-`customGraphs: # In this section, we can configure custom graphs`
-  `- name: Altitude baro vs GPS # Name of the custom graph
+customGraphs: # In this section, we can configure custom graphs
+  - name: Altitude baro vs GPS # Name of the custom graph
     values: # Values
       - file: GarminFenix8_WahooTRACKR_GNSSDual.fit # Fit file with the data field
         field: enhanced_altitude # data field to include in the customer graph
@@ -80,4 +82,5 @@ After each successful run, a new project.yaml.example is generated with example 
 GarminFenix8_WahooTRACKR_GNSSDual.fit: # options for each fit files
   delta: 0 # delta in second ti apply to the timestamps of this file (can be positive or negative int value)
 AppleWatchSeries10_OHR_GNSS.fit:
-  delta: 0`
+  delta: 0
+```
