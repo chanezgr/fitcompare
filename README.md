@@ -5,7 +5,7 @@ This script is only intended to run in a docker image. Any other use is not supp
 
 ## Build the Docker image
 1. Get the file fitcompare.py, Dockerfile and config.ini, place all the files in a directory
-2. Create a Mapbox API and put it in the config.ini file
+2. Create a Mapbox API key and put it in the config.ini file
 3. Build the Docker image using: docker build . -t fitcompare
 
 ## Run the container=
