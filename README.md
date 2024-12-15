@@ -1,7 +1,10 @@
 # fitcompare
 Python tool to compare two FIT files data
 
-This script is only intended to run in a docker image. Any other use is not supported.
+This script is only intended to run in a docker image. Any other use is not recommended.
+
+Note that this is the fitcompare tool used for nakan.ch compare graphs and data. The only part not included in this public version is the algorithms to compute scores for hr data.
+
 
 ## Build the Docker image
 1. Get the file `fitcompare.py`, `Dockerfile` and `config.ini`, place all the files in a directory
