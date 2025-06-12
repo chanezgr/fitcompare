@@ -51,7 +51,7 @@ SCRIPT_VER = "2.6.1 DEV"
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
-# 2.6.1: Add values in charts titles
+# 2.6.1: Add values in charts titles / Clean error if no HRV data
 # 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
 # 2.5.4: Add nktool_battery as standard charge field
 # 2.5.3: Add "Track" as a GNSS/GPS mode
@@ -1014,6 +1014,10 @@ for compare_value in values_to_compare:
       else:
         a_values = loadFitHrv(ffile, hrvDelta)
       if (args.debug): print("[debug] Number of HRV points for %s: %i" % (ffile, len(a_values)))
+      # If we have 0 points, then rise error, it's not possible to go ahead with HRV...
+      if (len(a_values) == 0): 
+      	print("ERROR: No valid HRV data. Add a CSV or ensure HRV is correctly set in FIT file")
+      	break
       if (shortest_hrv == 0) or (shortest_hrv > len(a_values)):
         shortest_hrv = len(a_values)
     else:
