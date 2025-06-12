@@ -51,7 +51,7 @@ SCRIPT_VER = "2.6.1 DEV"
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
-# 2.6.1: Add values in charts titles / Clean error if no HRV data
+# 2.6.1: Add values in charts titles / Clean error if no HRV data / 
 # 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
 # 2.5.4: Add nktool_battery as standard charge field
 # 2.5.3: Add "Track" as a GNSS/GPS mode
@@ -110,6 +110,7 @@ parser.add_argument('--prefix', '-p', dest='project_prefix', help='Set the proje
 parser.add_argument('--debug', '-d', action='store_true', help='Enable debug')
 parser.add_argument('--export', '-e', action='store_true', help='Export graphs values also as CSV')
 parser.add_argument('--config', '-c', dest='project_config', help='Use an alternative configuration YAML file')
+parser.add_argument('--list-fields', '-l', action='store_true', help='List all fields for FITFILE')
 args = parser.parse_args()
 
 # If debug mode
@@ -255,7 +256,7 @@ def loadFitSession(fitname, summary):
 # Output: 
 # - Array of data for each point, a dict for each fields
 def loadFitData(fitname, summary, fields):
-  global delta_values, project_conf_zoom, project_conf_zoom_range, project_conf_map, custom_graphs_values, APP_PATH
+  global delta_values, project_conf_zoom, project_conf_zoom_range, project_conf_map, custom_graphs_values, APP_PATH, args.list-fields
   # By default we include the timestamp in the data collected
   fields.append('timestamp')
 
@@ -291,12 +292,16 @@ def loadFitData(fitname, summary, fields):
   # Keep previous value for rare cases where heart_rate contains None for one point
   hr_previous_value = 0
   
+  i = 0
+  all_file_values = []
   for record in data.get_messages('record'):
     # If we have no zoom, or in range
     if ((project_conf_zoom == False) or ((record.get_value('timestamp') + datetime.timedelta(0,delta) >= start_point) and (record.get_value('timestamp') + datetime.timedelta(0,delta) <= end_point))):
       # New point 
       this_value = {}
       for value in fields:
+      	if (i == 0):
+      	  all_file_values.append(value)
         # If value is timestamp, then add the delta
         if (value == "timestamp"):
           this_value[value] = record.get_value(value) + datetime.timedelta(0,delta)
@@ -320,6 +325,11 @@ def loadFitData(fitname, summary, fields):
           else:
             this_value[value] = record.get_value(value)
       all_values.append(this_value)
+      i = i+1
+  if args.list-fields
+    print("Values/Fields for file %s:" % (fitname))
+    for field in all_file_values:
+      print("  - %s" % (field))
   
   return all_values
 
