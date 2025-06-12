@@ -33,12 +33,10 @@ import seaborn as sns
 import pathlib 
 from scipy.signal import savgol_filter
 import numpy as np
+import csv
 
-FITCOMPARE_PRIVATE = True
-try: 
-  from fitcompare_private import *
-except: 
-  FITCOMPARE_PRIVATE = False
+# Import advanced HR analysis functions
+from fitcompare_advanced import *
 
 # #############################
 # INIT section
@@ -47,9 +45,25 @@ except:
 sns.set()
 
 # Define CONST
-SCRIPT_VER = "2.2.0"
-
+SCRIPT_VER = "2.6.0"
+# TODO: 
+# - Clean the filtering method of HRV
+# - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
+# 
 # CHANGELOG:
+# 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
+# 2.5.4: Add nktool_battery as standard charge field
+# 2.5.3: Add "Track" as a GNSS/GPS mode
+# 2.5.2: Add a command line parameter to change the project configuration file
+# 2.5.1: Add the HR monitor name in HRV chart
+# 2.5.0: Force re-align of data arrays in order to get good HR values (peak). Add a vertical line at max HR on heart_rate graph
+# 2.4.4: Fix the data loading for heart_rate with values None (will be set to 0)
+# 2.4.3: Add a function to remove abnormal HRV values and setting the percentage
+# 2.4.2: Slight adjust of the HR score for some extreme cases 
+# 2.4.1: Add the ability to set custom threashold for HRV peaks removal
+# 2.4.0: Add a beginning of basic support of HRV data analyzis
+# 2.3.0: Improve reliability of HR score with a rewrite of reduce_latency function
+# 2.2.1: Add the ability to enter manually start and end battery level in yaml project file
 # 2.2.0: Improve mapbox map output file. Split private functions in separate file to publish fitcompare core
 # 2.1.10: If map is disabled in the config file, disable all the referecnes to the map in the summary
 # 2.1.9: Battery burn rate is displayed in HH h MM instead of decimal
@@ -63,22 +77,24 @@ MAPBOX_API_KEY = config['map']['mapbox_api_key']
 APP_PATH = "/project/"
 
 # Output the running dialog with version number at the very beginning
-if (FITCOMPARE_PRIVATE):
-  print("Running fitcompare advanced v%s" % (SCRIPT_VER))
-else:
-  print("Running fitcompare v%s" % (SCRIPT_VER))
+print("Running fitcompare v%s" % (SCRIPT_VER))
 
 # Default configurations, can be overriden by project.yaml file:
 project_conf_file_exists = False
 project_conf_altitude_gap = 1
 delta_values = {}
+hrvCsv_values = {}
+hrvDelta_values = {}
 project_conf_zoom = False
 project_conf_zoom_range = [0, 0]
 values_to_compare = ['heart_rate', 'altitude', 'distance']
 project_conf_map = True
 project_conf_map_style = 'satellite-streets-v12'
 project_conf_align = True
+project_conf_remove_hrv_abnormal = False
+project_conf_remove_hrv_abnormal_threshold = 20
 custom_graphs_values = []
+charge = {}
 conf_has_custom_graphs = False
 project_conf_inc_smoothed_alt = False
 
@@ -92,10 +108,17 @@ parser.add_argument('--reference-file', '-r', dest='reference_file', help='Set t
 parser.add_argument('--prefix', '-p', dest='project_prefix', help='Set the project prefix for output files')
 parser.add_argument('--debug', '-d', action='store_true', help='Enable debug')
 parser.add_argument('--export', '-e', action='store_true', help='Export graphs values also as CSV')
+parser.add_argument('--config', '-c', dest='project_config', help='Use an alternative configuration YAML file')
 args = parser.parse_args()
 
 # If debug mode
 if (args.debug): print("[debug] Enable debug mode")
+
+# Define the configuration file:
+project_conf_file = APP_PATH + '/project.yaml'
+if args.project_config is not None:
+  project_conf_file = APP_PATH + '/' + args.project_config
+  if (args.debug): print("[debug] Project configuration file set to " + args.project_config)
 
 # Define if there is a reference file, define vars accordingly
 with_reference_file = False
@@ -127,7 +150,7 @@ if (len(fitfiles) == 1):
 # PROJECT CONFIG section
   
 # Read the project configuration, if there is one, and override defaults
-project_conf_file = APP_PATH + '/project.yaml'
+if (args.debug): print("[debug] Now, trying to open the configuration file" + project_conf_file)
 if (os.path.isfile(project_conf_file)):
   project_conf_file_exists = True
   if (args.debug): print("[debug] A project configuration file is present")
@@ -161,7 +184,16 @@ if (os.path.isfile(project_conf_file)):
   # List of values to graph
   if ("graphs" in project_conf['project']):
     values_to_compare = project_conf['project']['graphs']
-    if (args.debug): print("[debug] Read configuration file: 'map' value set to " + str(project_conf['project']['graphs']))
+    if (args.debug): print("[debug] Read configuration file: 'graphs' value set to " + str(project_conf['project']['graphs']))
+  # Remove aberrant values for HRV (more than 3 seconds)
+  if ("removeAbnormalHrv" in project_conf['project']):
+    project_conf_remove_hrv_abnormal = project_conf['project']['removeAbnormalHrv']
+    if (args.debug): print("[debug] Read configuration file: 'removeAbnormalHrv' value set to " + str(project_conf['project']['removeAbnormalHrv']))
+  # Remove aberrant values for HRV (more than 3 seconds)
+  if ("removeAbnormalHrvThreshold" in project_conf['project']):
+    project_conf_remove_hrv_abnormal_threshold = project_conf['project']['removeAbnormalHrvThreshold']
+    if (args.debug): print("[debug] Read configuration file: 'removeAbnormalHrvThreshold' value set to " + str(project_conf['project']['removeAbnormalHrvThreshold']))     
+      
   # Generate a list of custom graphs fields:
   if (("customGraphs" in project_conf) and (len(project_conf['customGraphs']) > 0)):
     if (args.debug): print("[debug] Read configuration file: 'customGraphs' is present")
@@ -177,7 +209,18 @@ if (os.path.isfile(project_conf_file)):
       if "delta" in project_conf[ffile]:
         if (args.debug): print("[debug] Read configuration file: 'delta' value set to %i for file %s" % (project_conf[ffile]['delta'], ffile))
         delta_values[ffile] = project_conf[ffile]['delta']
-
+      if "hrvCsv" in project_conf[ffile]:
+        if (args.debug): print("[debug] Read configuration file: 'hrvCsv' value set to %s for file %s" % (project_conf[ffile]['hrvCsv'], ffile))
+        hrvCsv_values[ffile] = project_conf[ffile]['hrvCsv']
+      if "hrvDelta" in project_conf[ffile]:
+        if (args.debug): print("[debug] Read configuration file: 'hrvDelta' value set to %i for file %s" % (project_conf[ffile]['hrvDelta'], ffile))
+        hrvDelta_values[ffile] = project_conf[ffile]['hrvDelta']
+      if "charge" in project_conf[ffile]:
+        if (args.debug): print("[debug] Read configuration file: 'charge' value set to %i/%1 for file %s" % (project_conf[ffile]['charge'][0], project_conf[ffile]['charge'][1], ffile))
+        charge[ffile] = project_conf[ffile]['charge']
+else:
+  if (args.debug): print("[debug] No configuration file to open, continuing with defaults")
+  
 # #############################
 # FUNCTIONS section
 
@@ -202,8 +245,7 @@ def loadFitSession(fitname, summary):
     # Add everything to the main return value
     r_sessions.append(r_session)
   return r_sessions
-  
-  
+
 # This function load fit data in an array
 # Input:
 # - fitname (fit file name)
@@ -237,13 +279,17 @@ def loadFitData(fitname, summary, fields):
   
   if fitname in delta_values:
     delta = delta_values[fitname]
-    if (args.debug): print("[debug] [loadFitData]Delta value to apply for file %s: %i" % (fitname, delta))
+    if (args.debug): print("[debug] [loadFitData] Delta value to apply for file %s: %i" % (fitname, delta))
   # Load in an array the following data:
   # timestamp, heart_rate, altitude, distance, power
   data = fitparse.FitFile(APP_PATH + fitname)
   # For each point
   all_values = []
   altitude = 0
+  
+  # Keep previous value for rare cases where heart_rate contains None for one point
+  hr_previous_value = 0
+  
   for record in data.get_messages('record'):
     # If we have no zoom, or in range
     if ((project_conf_zoom == False) or ((record.get_value('timestamp') + datetime.timedelta(0,delta) >= start_point) and (record.get_value('timestamp') + datetime.timedelta(0,delta) <= end_point))):
@@ -263,10 +309,78 @@ def loadFitData(fitname, summary, fields):
           this_value[value] = this_single_value
         # No priority list, just put the value if not none
         else:
-          this_value[value] = record.get_value(value)
+          if (value == 'heart_rate'):
+            if (record.get_value(value) == None):
+              this_value[value] = hr_previous_value
+              if (args.debug): print("[debug] [loadFitData] NOTICE: A value 'None' was found in heart_rate loading data from file %s " % (fitname))
+            else:
+              this_value[value] = record.get_value(value)
+              hr_previous_value = record.get_value(value)
+          else:
+            this_value[value] = record.get_value(value)
       all_values.append(this_value)
-  return all_values
   
+  return all_values
+
+# This function loads a hrv array from a CSV
+def loadCsvHrv(csv_file, hrvDelta):
+  global APP_PATH, project_conf_remove_hrv_abnormal, project_conf_remove_hrv_abnormal_threshold
+
+  rrintervals = []
+  last_value = 0
+  with open(APP_PATH + csv_file, mode='r') as file:
+    csv_reader = csv.reader(file)
+    i = 0
+    for row in csv_reader:
+      i = i+1
+      if ((i > 1) and (i > hrvDelta)):
+        this_value = int(row[0])
+        if (last_value == 0):
+          hrv_percentage = 0
+        else:
+          hrv_percentage = abs(100-(this_value*100/last_value))
+                  
+        # The soft and percentage filter
+        if ((last_value != 0 and project_conf_remove_hrv_abnormal) and (hrv_percentage > project_conf_remove_hrv_abnormal_threshold)):
+          rrintervals.append(last_value)
+        else:
+          rrintervals.append(this_value)
+          last_value = this_value
+          
+  return rrintervals
+
+ 
+# This function loads a hrv array from a FIT
+def loadFitHrv(fitname, hrvDelta):
+  global APP_PATH, project_conf_remove_hrv_abnormal, project_conf_remove_hrv_abnormal_threshold
+  
+  data = fitparse.FitFile(APP_PATH + fitname)
+  rrintervals = []
+  last_value = 0
+  i = 0
+  for record in data.get_messages('hrv'):
+    for record_data in record:
+      for RR_interval in record_data.value:
+        if RR_interval is not None:
+          i += 1
+          if (i > hrvDelta):
+            this_value = RR_interval*1000
+            if (last_value == 0):
+              hrv_percentage = 0
+            else:
+              hrv_percentage = abs(100-(this_value*100/last_value))
+            
+            # The soft and percentage filter
+            if ((last_value != 0 and project_conf_remove_hrv_abnormal) and (hrv_percentage > project_conf_remove_hrv_abnormal_threshold)):
+                rrintervals.append(last_value)
+            else:
+              rrintervals.append(this_value)
+              last_value = this_value
+            
+  return rrintervals
+
+
+
 # This function take a fit file name and "decode" all the values
 # Fit file name is something like: 
 #    MakeModel_HRSource_GNSSConfig_DistanceSensor.fit
@@ -279,6 +393,7 @@ def loadFitData(fitname, summary, fields):
 #                - GPS:      for GPS only
 #                - GNSS:     for all GNSS systems
 #                - GNSSDual: for all GNSS systems + GPS Multiband
+#                - Track:    for running mode specific for running track
 #    DistanceSensor: Describe the distance sensor brand and model used (if any)
 # Return an array with labels for each part as follow:
 # [MakeModel, HRSource, GNSSConfig, DistanceSensor]
@@ -300,6 +415,8 @@ def decodeFitName(fitname):
     gnsssource = "Tous les systèmes GNSS et GPS Multibande"
   elif (fitnameparts[2] == "SatIQ"):
     gnsssource = "Mode GNSS et GPS Multibande automatique"
+  elif (fitnameparts[2] == "Track"):
+    gnsssource = "Profil spécifique pour la piste"
   elif (fitnameparts[2] == "NONE"):
     gnsssource = "Non spécifié"
   # Distance sensor
@@ -381,7 +498,7 @@ def fitSummary(fitname):
   for record in data.get_messages('record'):
     i+=1
     if i <= 1: 
-      start_battery = record.get_value('Battery level')
+      start_battery = record.get_value('nktool_battery')
       timestamp = record.get_value('timestamp')
     if ((i >= project_conf_altitude_gap) and (start_alt == 0)):
       if (record.get_value('enhanced_altitude') != None):
@@ -393,7 +510,7 @@ def fitSummary(fitname):
     elif (record.get_value('altitude') != None):
       alt = record.get_value('altitude')
     dist = record.get_value('distance')
-    end_battery = record.get_value('Battery level')
+    end_battery = record.get_value('nktool_battery')
     if ((record.get_value('position_lat') != None) and (record.get_value('position_long') != None) and (project_conf_map == True)):
       avg_lat.append(record.get_value('position_lat'))
       avg_long.append(record.get_value('position_long'))
@@ -403,6 +520,16 @@ def fitSummary(fitname):
   
   if (dist == None):
     dist = total_distance
+  
+  # If battery detail is manually entered into the project YAML file
+  if (start_battery == None):
+    try:
+      start_battery = charge[fitname][0]
+      end_battery = charge[fitname][1]
+    except:
+      start_battery = None
+      end_battery = None  
+
   return_val = []
   return_val.append(profile_ver)        # 0 -> ANT/FIT profil version
   return_val.append(protocol_ver)       # 1 -> ANT/FIT protocol version
@@ -537,6 +664,7 @@ for ffile in fitfiles:
   # Load data of fit file in array
   if (args.debug): print("[debug] Call loadFitData for file %s" % (ffile))
   ff_data[ffile] = loadFitData(ffile, summary, values_to_compare[:])
+
   if (args.debug): print("[debug] Call loadFitSession for file %s" % (ffile))
   ff_session = loadFitSession(ffile, summary)
   
@@ -631,6 +759,10 @@ for ffile in fitfiles:
   textOutput.append(" Configuration values for %s\n" % (ffile))
   if ffile in delta_values:
     textOutput.append("  Delta: %i\n" % (delta_values[ffile]))
+  if ffile in charge:
+    textOutput.append("  Charge value: %i -> %i\n" % (charge[ffile][0], charge[ffile][1]))
+  if ffile in hrvCsv_values:
+    textOutput.append("  HRV CSV File: %s\n" % (hrvCsv_values[ffile]))
 textOutput.append("=========================================================================\n")
 
 # Display the project output and write it to project_logfile.txt
@@ -672,6 +804,12 @@ if (project_conf_align):
     if (thisPoint == True):
       common_timestamp.append(ts)
   print(" Common timestamps:                  %i" % (len(common_timestamp)))
+  # Now, remove all the timestamps in the fffiles arrays which are not in the common 
+  if (args.debug): print("[debug] Align: removing all timestamps points not in the common list")
+  for ffile in fitfiles:
+    for record in ff_data[ffile][:]:
+      if record['timestamp'] not in common_timestamp:
+        ff_data[ffile].remove(record)
 
 else:
   # If we don't align, we have to fill the shortest dataset to have the same amount of points
@@ -706,8 +844,43 @@ print("=========================================================================
 
 # ==============
 # GRAPHS
+def generateGraph(APP_PATH, project_prefix, compare_value, chartData, args, project_conf_align, chartTitle, hr_max_pos): 
+  # Generate the graph
+  pathlib.Path(APP_PATH + "pnggraphs").mkdir(exist_ok=True)
+  if (project_prefix != ''):
+    graph_file = APP_PATH + "pnggraphs/" + project_prefix + "_" + re.sub( '(?<!^)(?=[A-Z])', '_', compare_value ).lower()
+  else:
+    graph_file = APP_PATH + "pnggraphs/" + re.sub( '([A-Z])', r'+\1', compare_value ).lower()
+  
+  # Create a Pandas DataSet for this graph
+  chartDataFrame = pd.DataFrame(chartData)
+  # If the CSV export is enabled
+  if (args.export):
+    chartDataFrame.to_csv(graph_file + '.csv', sep=',', decimal='.')
+  sns.set_theme(font='Montserrat')
+  sns.set(rc = {'figure.figsize':(20, 10)})
+  # Max number of points
+  if (project_conf_align):
+    global common_timestamp
+    max_nb_points = len(common_timestamp)
+  else:
+    global longest_ts_array
+    max_nb_points = longest_ts_array
+  thisPlot, thisAx = sns.lineplot(x=None, y=None, data=chartDataFrame, linewidth=1, dashes=False).set(title=chartTitle, xlim=(-5,max_nb_points+5))
+  plt.grid(True)
+  
+  # If heart_rate graph and analyzis, generate a vertical line at max heart rate
+  if ((compare_value == "heart_rate") and project_conf_align):
+    for mhp in hr_max_pos:
+      plt.axvline(x=mhp, color='gray', linewidth=1, linestyle='dotted')
+  
+  plt.savefig(graph_file + '.png', bbox_inches='tight', pad_inches=0.3)
+  plt.clf()
+
 # Start with the generation of the comparaison data sets
+shortest_hrv = 0
 for compare_value in values_to_compare:
+  
   if (args.debug): print("[debug] Configuring output for field %s" % (compare_value))
   # We print what we are doing
   print("Generating data for %s" % (compare_value))
@@ -720,6 +893,8 @@ for compare_value in values_to_compare:
     chartTitle = "Analyse de l'accumulation de distance"
   elif (compare_value == 'power'):
     chartTitle = "Analyse des données de puissance"
+  elif (compare_value == 'hrv'):
+    chartTitle = "Analyse des données R-R"
   else:
     chartTitle = "Analyse du champ de données \"%s\"" % (compare_value)
  
@@ -732,6 +907,7 @@ for compare_value in values_to_compare:
   # ##############################
   # Generate all "standard" graphs
   # ##############################
+  hr_max_pos = []
   for ffile in fitfiles:
     # Parse the fitfile
     # Build a dataset for this file
@@ -742,9 +918,9 @@ for compare_value in values_to_compare:
     i = 0
     
     # For the HR stats data
-    ag = {}
-    ag['a'] = []
-    ag['m'] = 0
+    average_hr_gap = {}
+    average_hr_gap['average'] = []
+    average_hr_gap['max'] = 0
     
     hr_analyze = False
     
@@ -764,7 +940,7 @@ for compare_value in values_to_compare:
         if ((compare_value == 'heart_rate') and (record['heart_rate'] != None)):
           thisPoint = record['heart_rate']
         # If the current field is heart_rate, and we have a reference file, and we have at least two files:
-        if ((compare_value == 'heart_rate') and (len(fitfiles) >= 2) and (with_reference_file) and (FITCOMPARE_PRIVATE)):
+        if ((compare_value == 'heart_rate') and (len(fitfiles) >= 2) and (with_reference_file)):
           # If this file is not the reference file
           if (ffile != reference_file):
             # Than we can compute the HR score, starting after one minute
@@ -773,7 +949,7 @@ for compare_value in values_to_compare:
               # Current bpm
               cur_bpm = record['heart_rate']
               # Get the HR value of the reference file for this timestamp
-              ag = bpm_new_point(cur_bpm, record['timestamp'], ag, ff_data, reference_file)
+              average_hr_gap = bpm_new_point(cur_bpm, record['timestamp'], average_hr_gap, ff_data, reference_file, i)
         
         # If the current field is altitude
         if (compare_value == 'altitude'):
@@ -806,13 +982,14 @@ for compare_value in values_to_compare:
       normalized_alt_loss = normalizedAltLoss(smoothed_altitude)
     
     # Compute the HR score
-    if ((hr_analyze) and (FITCOMPARE_PRIVATE)):
-      hr_adv_data = adv_hr_sum(ag)  
+    if (hr_analyze):
+      hr_adv_data = adv_hr_sum(average_hr_gap)  
+      hr_max_pos.append(hr_adv_data['max_gap_position'])
     
     if (compare_value == 'heart_rate'):
       hr_summary = ''
-      if ((hr_analyze) and (FITCOMPARE_PRIVATE)):
-        hr_summary = " Ecart moyen: %.2f - Ecart max: %.2f - Score: %.1f%%" % (hr_adv_data['ag'], hr_adv_data['mg'], hr_adv_data['hs'])
+      if (hr_analyze):
+        hr_summary = " Ecart moyen: %.2f - Ecart max: %.2f - Score: %.1f%%" % (hr_adv_data['average_gap'], hr_adv_data['max_gap'], hr_adv_data['hr_score'])
       chart_legend = legend[0] + " (mesure cardio: " + legend[1] + ")" + hr_summary
     elif (compare_value == 'altitude'):
       chart_legend = "%s (D+: %.1f / D-: %.1f / Altitude de départ: %.1f / Altitude d'arrivée: %.1f" % (legend[0], normalized_alt_gain, normalized_alt_loss, summary[17], summary[18])
@@ -823,6 +1000,21 @@ for compare_value in values_to_compare:
         chart_legend = "%s (Distance mesurée par: %s): %.2f m" % (legend[0], legend[3], summary[5])
       else:
         chart_legend = "%s: %.2f m" % (legend[0], summary[5])
+    
+    # This part for the HRV graph
+    elif (compare_value == "hrv"):
+      hrvDelta = 0
+      chart_legend = "%s (%s)" % (legend[0], legend[1])
+      if ffile in hrvDelta_values: 
+        hrvDelta = hrvDelta_values[ffile]
+      # If the current file has a HRV parameter
+      if ffile in hrvCsv_values:
+        a_values = loadCsvHrv(hrvCsv_values[ffile], hrvDelta)
+      else:
+        a_values = loadFitHrv(ffile, hrvDelta)
+      if (args.debug): print("[debug] Number of HRV points for %s: %i" % (ffile, len(a_values)))
+      if (shortest_hrv == 0) or (shortest_hrv > len(a_values)):
+        shortest_hrv = len(a_values)
     else:
       chart_legend = "%s" % (legend[0])
     # Get the lengh of datatable to align next values
@@ -835,38 +1027,25 @@ for compare_value in values_to_compare:
       smoothed_altitude_aligned = smoothed_altitude[lengh_diff:]
       # Add smoothed alt data to chart
       chartData['%s (smoothed altitude)' % (legend[0])] = smoothed_altitude_aligned
-
-  # Generate the graph
-  pathlib.Path(APP_PATH + "pnggraphs").mkdir(exist_ok=True)
-  if (project_prefix != ''):
-    graph_file = APP_PATH + "pnggraphs/" + project_prefix + "_" + re.sub( '(?<!^)(?=[A-Z])', '_', compare_value ).lower()
-  else:
-    graph_file = APP_PATH + "pnggraphs/" + re.sub( '([A-Z])', r'+\1', compare_value ).lower()
+      
+  # Check for HRV data lenght
+  if (compare_value == "hrv"):
+    i = 0
+    for line in chartData:
+      key, value = list(chartData.items())[i]
+      if len(value) > shortest_hrv: 
+        line = value[:shortest_hrv]
+        chartData[key] = line
+      i = i+1
   
-  # Create a Pandas DataSet for this graph
-  chartDataFrame = pd.DataFrame(chartData)
-  # If the CSV export is enabled
-  if (args.export):
-    chartDataFrame.to_csv(graph_file + '.csv', sep=',', decimal='.')
-  sns.set_theme(font='Montserrat')
-  sns.set(rc = {'figure.figsize':(20, 10)})
-  # Max number of points
-  if (project_conf_align):
-    max_nb_points = len(common_timestamp)
-  else:
-    max_nb_points = longest_ts_array
-  thisPlot, thisAx = sns.lineplot(x=None, y=None, data=chartDataFrame, linewidth=1, dashes=False).set(title=chartTitle, xlim=(-5,max_nb_points+5))
-  plt.grid(True)
-  plt.savefig(graph_file + '.png', bbox_inches='tight', pad_inches=0.3)
-  plt.clf()
+  # Generate graph
+  generateGraph(APP_PATH, project_prefix, compare_value, chartData, args, project_conf_align, chartTitle, hr_max_pos)
   
 # ###############################
 # Generate all the customs graphs
 # ###############################
 if (conf_has_custom_graphs):
   for cust_graph in project_conf['customGraphs']:
-    #thisData = {}
-    #thisLabel = {}
     chartData = {}
     chartData.clear()
     graph_name = cust_graph['name']
@@ -903,11 +1082,14 @@ if (conf_has_custom_graphs):
       max_nb_points = longest_ts_array
     thisPlot, thisAx = sns.lineplot(x=None, y=None, data=chartDataFrame, linewidth=1, dashes=False).set(title=chartTitle, xlim=(-5,max_nb_points+5))
     plt.grid(True)
+    
     plt.savefig(graph_file + '.png', bbox_inches='tight', pad_inches=0.3)
     plt.clf()
-
+    
+    
 # Generate a GPS MAP
-if (project_conf_map):
+def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project_conf_map_style, ff_summary, APP_PATH):
+
   print("Generating map")
   gpx_data = {}
   gpx_colors = ['#0000ff', '#ff0000', '#00ff00', '#bf00ff', '#6e6e6e', '#D7DF01', '#A9BCF5', '#A9F5A9', '#F5A9A9', '#000000', '#01DFD7', '#F5A9E1', '#FF8000', '#08088A']
@@ -1009,6 +1191,10 @@ if (project_conf_map):
   fmap.write('</script>')
   fmap.close()
 
+# Generate Mapbox map if map is enabled
+if (project_conf_map):
+  generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project_conf_map_style, ff_summary, APP_PATH)
+
 # Generate an example config file
 # Get all sessions if more than 1
 sessions = []
@@ -1042,10 +1228,12 @@ else:
   # Not multisession, an arbitrary example
   fexconf.write('  zoom: [90, 120]\n')
 fexconf.write('  altitudeGap: 8  # Seconds\n')
-fexconf.write('  map: False\n')
+fexconf.write('  map: false\n')
 fexconf.write('  mapStyle: outdoors-v12\n')
 fexconf.write('  graphs: [\'heart_rate\', \'altitude\', \'distance\']\n')
-fexconf.write('  includeSmoothedAlt: False\n')
+fexconf.write('  includeSmoothedAlt: false\n')
+fexconf.write('  removeAbnormalHrv: false\n')
+fexconf.write('  removeAbnormalHrvThreshold: 20 # percentage of the previous value\n')
 fexconf.write('customGraphs:\n')
 fexconf.write('  - name: Altitude baro vs GPS\n')
 fexconf.write('    values:\n')
@@ -1058,4 +1246,7 @@ fexconf.write('        label: Altitude GPS\n')
 for ffile in fitfiles:
   fexconf.write('%s:\n' % (ffile))
   fexconf.write('  delta: 0\n')
+  fexconf.write('#  charge: [99, 87]\n')
+  fexconf.write('#  hrvCsv: polar_hrv.csv\n')
+  fexconf.write('#  hrvCsv: polar_hrv.csv\n')
 fexconf.close()
