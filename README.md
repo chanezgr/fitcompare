@@ -3,7 +3,7 @@ Python tool to compare two FIT files data
 
 This script is only intended to run in a docker image. Any other use is not recommended.
 
-Note that this is the fitcompare tool used for nakan.ch compare graphs and data. The only part not included in this public version is the algorithms to compute scores for hr data.
+Note that this is the fitcompare tool used for nakan.ch compare graphs and data.
 
 
 ## Build the Docker image
