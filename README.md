@@ -5,7 +5,6 @@ This script is only intended to run in a docker image. Any other use is not reco
 
 Note that this is the fitcompare tool used for nakan.ch compare graphs and data.
 
-
 ## Build the Docker image
 1. Get the file `fitcompare.py`, `fitcompare_advanced.py` and `Dockerfile`, place all the files in a directory
 2. Create a Mapbox API key and put it in a file named `config.ini` with the following format: 
