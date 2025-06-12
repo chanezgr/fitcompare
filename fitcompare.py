@@ -45,12 +45,13 @@ from fitcompare_advanced import *
 sns.set()
 
 # Define CONST
-SCRIPT_VER = "2.6.0"
+SCRIPT_VER = "2.6.1 DEV"
 # TODO: 
 # - Clean the filtering method of HRV
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
+# 2.6.1: Add values in charts titles
 # 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
 # 2.5.4: Add nktool_battery as standard charge field
 # 2.5.3: Add "Track" as a GNSS/GPS mode
@@ -886,15 +887,15 @@ for compare_value in values_to_compare:
   print("Generating data for %s" % (compare_value))
   # Build a complete dataset
   if (compare_value == 'heart_rate'):
-    chartTitle = "Analyse de la fréquence cardiaque"
+    chartTitle = "Analyse de la fréquence cardiaque (bpm)"
   elif (compare_value == 'altitude'):
-    chartTitle = "Analyse de l'altitude"
+    chartTitle = "Analyse de l'altitude (m)"
   elif (compare_value == 'distance'):
-    chartTitle = "Analyse de l'accumulation de distance"
+    chartTitle = "Analyse de l'accumulation de distance (m)"
   elif (compare_value == 'power'):
-    chartTitle = "Analyse des données de puissance"
+    chartTitle = "Analyse des données de puissance (W)"
   elif (compare_value == 'hrv'):
-    chartTitle = "Analyse des données R-R"
+    chartTitle = "Analyse des données R-R (ms)"
   else:
     chartTitle = "Analyse du champ de données \"%s\"" % (compare_value)
  
