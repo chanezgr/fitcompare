@@ -110,9 +110,11 @@ parser.add_argument('--prefix', '-p', dest='project_prefix', help='Set the proje
 parser.add_argument('--debug', '-d', action='store_true', help='Enable debug')
 parser.add_argument('--export', '-e', action='store_true', help='Export graphs values also as CSV')
 parser.add_argument('--config', '-c', dest='project_config', help='Use an alternative configuration YAML file')
-parser.add_argument('--list-fields', '-l', action='store_true', help='List all fields for FITFILE')
+parser.add_argument('--listfields', '-l', action='store_true', help='List all fields for FITFILE')
 args = parser.parse_args()
 
+# List fields:
+config_list_fields = args.listfields
 # If debug mode
 if (args.debug): print("[debug] Enable debug mode")
 
@@ -256,7 +258,7 @@ def loadFitSession(fitname, summary):
 # Output: 
 # - Array of data for each point, a dict for each fields
 def loadFitData(fitname, summary, fields):
-  global delta_values, project_conf_zoom, project_conf_zoom_range, project_conf_map, custom_graphs_values, APP_PATH, args.list-fields
+  global delta_values, project_conf_zoom, project_conf_zoom_range, project_conf_map, custom_graphs_values, APP_PATH, config_list_fields
   # By default we include the timestamp in the data collected
   fields.append('timestamp')
 
@@ -299,9 +301,13 @@ def loadFitData(fitname, summary, fields):
     if ((project_conf_zoom == False) or ((record.get_value('timestamp') + datetime.timedelta(0,delta) >= start_point) and (record.get_value('timestamp') + datetime.timedelta(0,delta) <= end_point))):
       # New point 
       this_value = {}
+      if ((i == 0) and (config_list_fields)):
+        print("*********************************************************")
+        print("Fields for file %s:" % (fitname))
+        for record_data in record:
+          print(" - %s" % (record_data.name))
+        print("*********************************************************")
       for value in fields:
-      	if (i == 0):
-      	  all_file_values.append(value)
         # If value is timestamp, then add the delta
         if (value == "timestamp"):
           this_value[value] = record.get_value(value) + datetime.timedelta(0,delta)
@@ -326,10 +332,6 @@ def loadFitData(fitname, summary, fields):
             this_value[value] = record.get_value(value)
       all_values.append(this_value)
       i = i+1
-  if args.list-fields
-    print("Values/Fields for file %s:" % (fitname))
-    for field in all_file_values:
-      print("  - %s" % (field))
   
   return all_values
 
