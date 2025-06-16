@@ -280,6 +280,7 @@ def loadFitData(fitname, summary, fields):
   priority_fields = {}
   priority_fields['altitude'] = ['enhanced_altitude', 'altitude']
   priority_fields['speed'] = ['enhanced_speed', 'speed']
+  priority_fields['charge'] = ['nktool_battery']
   
   if fitname in delta_values:
     delta = delta_values[fitname]
