@@ -34,6 +34,7 @@ import pathlib
 from scipy.signal import savgol_filter
 import numpy as np
 import csv
+import json
 
 # Import advanced HR analysis functions
 from fitcompare_advanced import *
@@ -45,12 +46,13 @@ from fitcompare_advanced import *
 sns.set()
 
 # Define CONST
-SCRIPT_VER = "2.6.1"
+SCRIPT_VER = "2.6.2 DEV"
 # TODO: 
 # - Clean the filtering method of HRV
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
+# 2.6.2: Add support for 5hz GPS on Garmin FIT files, and import HRV from Suunto JSON files
 # 2.6.1: Add values in charts titles / Clean error if no HRV data / Remove "half last point" for SIGMA devices
 # 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
 # 2.5.4: Add nktool_battery as standard charge field
@@ -85,6 +87,7 @@ project_conf_file_exists = False
 project_conf_altitude_gap = 1
 delta_values = {}
 hrvCsv_values = {}
+hrvSuunto_values = {}
 hrvDelta_values = {}
 project_conf_zoom = False
 project_conf_zoom_range = [0, 0]
@@ -216,6 +219,9 @@ if (os.path.isfile(project_conf_file)):
       if "hrvCsv" in project_conf[ffile]:
         if (args.debug): print("[debug] Read configuration file: 'hrvCsv' value set to %s for file %s" % (project_conf[ffile]['hrvCsv'], ffile))
         hrvCsv_values[ffile] = project_conf[ffile]['hrvCsv']
+      if "hrvSuunto" in project_conf[ffile]:
+        if (args.debug): print("[debug] Read configuration file: 'hrvSuunto' value set to %s for file %s" % (project_conf[ffile]['hrvSuunto'], ffile))
+        hrvSuunto_values[ffile] = project_conf[ffile]['hrvSuunto']
       if "hrvDelta" in project_conf[ffile]:
         if (args.debug): print("[debug] Read configuration file: 'hrvDelta' value set to %i for file %s" % (project_conf[ffile]['hrvDelta'], ffile))
         hrvDelta_values[ffile] = project_conf[ffile]['hrvDelta']
@@ -363,7 +369,34 @@ def loadCsvHrv(csv_file, hrvDelta):
           
   return rrintervals
 
- 
+# This function loads a hrv array from a Suunto JSON
+def loadSuuntoHrv(json_file, hrvDelta):
+  global APP_PATH, project_conf_remove_hrv_abnormal, project_conf_remove_hrv_abnormal_threshold
+  with open(APP_PATH + json_file, 'r', encoding='utf-8') as file:
+    data = json.load(file)
+    rr_values = data['DeviceLog']['R-R']['Data']
+
+  rrintervals = []
+  i = 0
+  last_value = 0
+  for rr in rr_values:
+    i += 1
+    if (i > hrvDelta):
+      this_value = rr
+    if (last_value == 0):
+      hrv_percentage = 0
+    else:
+      hrv_percentage = abs(100-(this_value*100/last_value))
+      
+    # The soft and percentage filter
+    if ((last_value != 0 and project_conf_remove_hrv_abnormal) and (hrv_percentage > project_conf_remove_hrv_abnormal_threshold)):
+      rrintervals.append(last_value)
+    else:
+      rrintervals.append(this_value)
+      last_value = this_value
+
+  return rrintervals
+
 # This function loads a hrv array from a FIT
 def loadFitHrv(fitname, hrvDelta):
   global APP_PATH, project_conf_remove_hrv_abnormal, project_conf_remove_hrv_abnormal_threshold
@@ -651,6 +684,12 @@ def fillDataArray(data, lenght, fields):
       this_point[field] = fill_value
     data.append(this_point)
   return data
+
+# This function will read and load additionnal positions of 5hz record 
+def load5hzGPS(fitname):
+  global APP_PATH
+  # Load fit file
+  data = fitparse.FitFile(APP_PATH + fitname)
 
 # #############################
 # PROCESS section
@@ -1024,6 +1063,8 @@ for compare_value in values_to_compare:
       # If the current file has a HRV parameter
       if ffile in hrvCsv_values:
         a_values = loadCsvHrv(hrvCsv_values[ffile], hrvDelta)
+      elif ffile in hrvSuunto_values:
+        a_values = loadSuuntoHrv(hrvSuunto_values[ffile], hrvDelta)
       else:
         a_values = loadFitHrv(ffile, hrvDelta)
       if (args.debug): print("[debug] Number of HRV points for %s: %i" % (ffile, len(a_values)))
