@@ -52,7 +52,7 @@ SCRIPT_VER = "2.6.2 DEV"
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
-# 2.6.2: Add support for 5hz GPS on Garmin FIT files, and import HRV from Suunto JSON files
+# 2.6.2: Add support for 5hz GPS on Garmin FIT files, import HRV from Suunto JSON files and skip specific timestamps
 # 2.6.1: Add values in charts titles / Clean error if no HRV data / Remove "half last point" for SIGMA devices
 # 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
 # 2.5.4: Add nktool_battery as standard charge field
@@ -91,6 +91,7 @@ hrvSuunto_values = {}
 hrvDelta_values = {}
 project_conf_zoom = False
 project_conf_zoom_range = [0, 0]
+project_conf_ignore = []
 values_to_compare = ['heart_rate', 'altitude', 'distance']
 project_conf_map = True
 project_conf_map_style = 'satellite-streets-v12'
@@ -176,6 +177,10 @@ if (os.path.isfile(project_conf_file)):
     project_conf_zoom = True
     project_conf_zoom_range = project_conf['project']['zoom']
     if (args.debug): print("[debug] Read configuration file: 'zoom' value set to [%i, %i]" % (project_conf_zoom_range[0], project_conf_zoom_range[1]))
+  # Ignore certains timestamps (relative, first datapoint is 0)
+  if ("ignore" in project_conf['project']):
+    project_conf_ignore = project_conf['project']['ignore']
+    if (args.debug): print("[debug] Read configuration file: 'ignore' value contains points")
   # Gap altitude data (wait for x seconds to plot altitude)
   if ("altitudeGap" in project_conf['project']):
     project_conf_altitude_gap = project_conf['project']['altitudeGap']
@@ -844,9 +849,14 @@ if (project_conf_align):
 
   # Then build a common_timestamps array
   common_timestamp = []
+  i = 0
   for ts in all_timestamp[0]:
     # By default, the timestamp is considered as OK
     thisPoint = True
+    # If this relative point is in ignore list
+    if (i in project_conf_ignore):
+      thisPoint = False
+    
     # Loop over all files
     for filearray in all_timestamp:
       # Loop over all timestamps
@@ -856,6 +866,7 @@ if (project_conf_align):
     # If point were found in each file, add to the common array
     if (thisPoint == True):
       common_timestamp.append(ts)
+    i += 1
   print(" Common timestamps:                  %i" % (len(common_timestamp)))
   # Now, remove all the timestamps in the fffiles arrays which are not in the common 
   if (args.debug): print("[debug] Align: removing all timestamps points not in the common list")
