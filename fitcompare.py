@@ -239,6 +239,14 @@ else:
 # #############################
 # FUNCTIONS section
 
+# This function transform a FIT timestamp to Python datetime object
+def fit_ts_to_dt(timestamp):
+  # Specific FIT epoch
+  fit_epoch = datetime.datetime(1989, 12, 31, 0, 0, 0)
+  # Convert to usable datetime
+  datetime_fit = fit_epoch + datetime.timedelta(seconds=timestamp)
+  return datetime_fit
+
 # This function load fit sessions (one for single activity, multiple for multisport)
 # Input: 
 # - fitname (fit file name)
@@ -272,11 +280,6 @@ def loadFitData(fitname, summary, fields):
   global delta_values, project_conf_zoom, project_conf_zoom_range, project_conf_map, custom_graphs_values, APP_PATH, config_list_fields
   # By default we include the timestamp in the data collected
   fields.append('timestamp')
-
-  # We include the position if maap is enabled
-  if (project_conf_map):
-    fields.append('position_lat')
-    fields.append('position_long')
   
   # And we also add the custom graphs fields:
   if (len(custom_graphs_values) > 0):
@@ -297,6 +300,11 @@ def loadFitData(fitname, summary, fields):
     delta = delta_values[fitname]
     if (args.debug): print("[debug] [loadFitData] Delta value to apply for file %s: %i" % (fitname, delta))
   # Load in an array the following data:
+  # We include the position if map is enabled
+  if (project_conf_map):
+    fields.append('position_lat')
+    fields.append('position_long')
+    gps5hz_data = load5hzGPS(fitname, delta)
   # timestamp, heart_rate, altitude, distance, power
   data = fitparse.FitFile(APP_PATH + fitname)
   # For each point
@@ -310,7 +318,8 @@ def loadFitData(fitname, summary, fields):
   all_file_values = []
   for record in data.get_messages('record'):
     # If we have no zoom, or in range
-    if ((project_conf_zoom == False) or ((record.get_value('timestamp') + datetime.timedelta(0,delta) >= start_point) and (record.get_value('timestamp') + datetime.timedelta(0,delta) <= end_point))):
+    record_timestamp = record.get_value('timestamp') + datetime.timedelta(0,delta)
+    if ((project_conf_zoom == False) or ((record_timestamp >= start_point) and (record_timestamp <= end_point))):
       # New point 
       this_value = {}
       if ((i == 0) and (config_list_fields)):
@@ -331,6 +340,30 @@ def loadFitData(fitname, summary, fields):
               this_single_value = record.get_value(possible_field)
               break
           this_value[value] = this_single_value
+        # If field is latitude, put an array instead of a single value:
+        elif (value == 'position_lat'):
+          this_value[value] = []
+          # Search if we have 5hz GPS position for this point:
+          multiple_point = False
+          for g5hz_pt in gps5hz_data:
+            if (g5hz_pt['ts'] == record_timestamp):
+              this_value[value].append(g5hz_pt['lat'])
+              multiple_point = True
+              break
+          if (multiple_point == False):
+            this_value[value].append(record.get_value(value))
+        # If field is latitude, put an array instead of a single value:
+        elif (value == 'position_long'):
+          this_value[value] = []
+          # Search if we have 5hz GPS position for this point:
+          multiple_point = False
+          for g5hz_pt in gps5hz_data:
+            if (g5hz_pt['ts'] == record_timestamp):
+              this_value[value].append(g5hz_pt['long'])
+              multiple_point = True
+              break
+          if (multiple_point == False):
+            this_value[value].append(record.get_value(value))
         # No priority list, just put the value if not none
         else:
           if (value == 'heart_rate'):
@@ -430,8 +463,6 @@ def loadFitHrv(fitname, hrvDelta):
               last_value = this_value
             
   return rrintervals
-
-
 
 # This function take a fit file name and "decode" all the values
 # Fit file name is something like: 
@@ -691,10 +722,23 @@ def fillDataArray(data, lenght, fields):
   return data
 
 # This function will read and load additionnal positions of 5hz record 
-def load5hzGPS(fitname):
+def load5hzGPS(fitname, delta):
   global APP_PATH
   # Load fit file
-  data = fitparse.FitFile(APP_PATH + fitname)
+  fitfile = fitparse.FitFile(APP_PATH + fitname)
+  
+  gps5hz_data = []
+  # Get all the "unknown_467" messages (GPS 5hz)
+  for message in fitfile.get_messages('unknown_467'):
+    values = message.get_values()
+    timestamp = fit_ts_to_dt(values['unknown_253']) + datetime.timedelta(0,delta)
+    latitudes = values['unknown_1']
+    longitudes = values['unknown_2']
+    if ((timestamp is not None) and (latitudes is not None) and (longitudes is not None)):
+      gps5hz_data.append({'ts': timestamp, 'lat': latitudes, 'long': longitudes})
+    
+  return gps5hz_data
+
 
 # #############################
 # PROCESS section
