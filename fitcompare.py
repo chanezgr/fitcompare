@@ -46,13 +46,13 @@ from fitcompare_advanced import *
 sns.set()
 
 # Define CONST
-SCRIPT_VER = "2.6.2 DEV"
+SCRIPT_VER = "2.7.0 DEV"
 # TODO: 
 # - Clean the filtering method of HRV
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
-# 2.6.2: Add support for 5hz GPS on Garmin FIT files, import HRV from Suunto JSON files and skip specific timestamps
+# 2.7.0: Add support for 5hz GPS on Garmin FIT files, import HRV from Suunto JSON files and skip specific timestamps
 # 2.6.1: Add values in charts titles / Clean error if no HRV data / Remove "half last point" for SIGMA devices
 # 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
 # 2.5.4: Add nktool_battery as standard charge field
@@ -63,7 +63,7 @@ SCRIPT_VER = "2.6.2 DEV"
 # 2.4.4: Fix the data loading for heart_rate with values None (will be set to 0)
 # 2.4.3: Add a function to remove abnormal HRV values and setting the percentage
 # 2.4.2: Slight adjust of the HR score for some extreme cases 
-# 2.4.1: Add the ability to set custom threashold for HRV peaks removal
+# 2.4.1: Add the ability to set custom threshold for HRV peaks removal
 # 2.4.0: Add a beginning of basic support of HRV data analyzis
 # 2.3.0: Improve reliability of HR score with a rewrite of reduce_latency function
 # 2.2.1: Add the ability to enter manually start and end battery level in yaml project file
@@ -302,8 +302,7 @@ def loadFitData(fitname, summary, fields):
   # Load in an array the following data:
   # We include the position if map is enabled
   if (project_conf_map):
-    fields.append('position_lat')
-    fields.append('position_long')
+    fields.append('position')
     gps5hz_data = load5hzGPS(fitname, delta)
   # timestamp, heart_rate, altitude, distance, power
   data = fitparse.FitFile(APP_PATH + fitname)
@@ -340,30 +339,18 @@ def loadFitData(fitname, summary, fields):
               this_single_value = record.get_value(possible_field)
               break
           this_value[value] = this_single_value
-        # If field is latitude, put an array instead of a single value:
-        elif (value == 'position_lat'):
+        # If field is position, put an array instead of a single value:
+        elif (value == 'position'):
           this_value[value] = []
           # Search if we have 5hz GPS position for this point:
           multiple_point = False
           for g5hz_pt in gps5hz_data:
             if (g5hz_pt['ts'] == record_timestamp):
-              this_value[value].append(g5hz_pt['lat'])
+              this_value[value].append({'lat': g5hz_pt['lat'], 'long': g5hz_pt['long']})
               multiple_point = True
               break
           if (multiple_point == False):
-            this_value[value].append(record.get_value(value))
-        # If field is latitude, put an array instead of a single value:
-        elif (value == 'position_long'):
-          this_value[value] = []
-          # Search if we have 5hz GPS position for this point:
-          multiple_point = False
-          for g5hz_pt in gps5hz_data:
-            if (g5hz_pt['ts'] == record_timestamp):
-              this_value[value].append(g5hz_pt['long'])
-              multiple_point = True
-              break
-          if (multiple_point == False):
-            this_value[value].append(record.get_value(value))
+            this_value[value].append({'lat': record.get_value('position_lat'), 'long': record.get_value('position_long')})
         # No priority list, just put the value if not none
         else:
           if (value == 'heart_rate'):
@@ -1210,8 +1197,16 @@ def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project
   for ffile in fitfiles:
     gpx_data[ffile] = []
     for point in ff_data[ffile]:
-      if ((point['position_lat'] != None) and (point['position_long'] != None)):
-        gpx_data[ffile].append([point['position_long'] * (180/pow(2,31)), point['position_lat'] * (180/pow(2,31))])
+      # If it's a 5hz GPS point
+      if (isinstance(point['position'][0]['long'], (tuple, list))):
+          i = 0
+          for gps_point in point['position'][0]['long']:
+            if (gps_point is not None and point['position'][0]['lat'][i] is not None):
+              gpx_data[ffile].append([gps_point * (180/pow(2,31)), point['position'][0]['lat'][i] * (180/pow(2,31))])
+            i += 1
+      # It's a standard point
+      elif ((point['position'][0]['long'] != None) and (point['position'][0]['lat'] != None)):
+        gpx_data[ffile].append([point['position'][0]['long'] * (180/pow(2,31)), point['position'][0]['lat'] * (180/pow(2,31))])
     start_lat = ff_summary[ffile][15]
     start_long = ff_summary[ffile][16]
 
