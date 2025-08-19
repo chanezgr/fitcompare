@@ -304,8 +304,8 @@ def loadFitData(fitname, summary, fields):
   if (project_conf_map):
     fields.append('position')
     gps5hz_data = load5hzGPS(fitname, delta)
-    if (args.debug) and (gps5hz_data): print("[debug] [loadFitData] Fitfile %s has 5hz GPS points" % (fitname, delta))
-    if (args.debug) and (not gps5hz_data): print("[debug] [loadFitData] Fitfile %s has NO 5hz GPS points" % (fitname, delta))
+    if (args.debug) and (gps5hz_data): print("[debug] [loadFitData] Fitfile %s has 5hz GPS points" % (fitname))
+    if (args.debug) and (not gps5hz_data): print("[debug] [loadFitData] Fitfile %s has NO 5hz GPS points" % (fitname))
   # timestamp, heart_rate, altitude, distance, power
   data = fitparse.FitFile(APP_PATH + fitname)
   # For each point
