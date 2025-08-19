@@ -321,7 +321,7 @@ def loadFitData(fitname, summary, fields):
     if ((project_conf_zoom == False) or ((record_timestamp >= start_point) and (record_timestamp <= end_point))):
       # New point 
       this_value = {}
-      if ((i == 0) and (config_list_fields)):
+      if ((i == 20) and (config_list_fields)):
         print("*********************************************************")
         print("Fields for file %s:" % (fitname))
         for record_data in record:
