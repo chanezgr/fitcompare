@@ -408,17 +408,17 @@ def loadSuuntoHrv(json_file, hrvDelta):
     i += 1
     if (i > hrvDelta):
       this_value = rr
-    if (last_value == 0):
-      hrv_percentage = 0
-    else:
-      hrv_percentage = abs(100-(this_value*100/last_value))
-      
-    # The soft and percentage filter
-    if ((last_value != 0 and project_conf_remove_hrv_abnormal) and (hrv_percentage > project_conf_remove_hrv_abnormal_threshold)):
-      rrintervals.append(last_value)
-    else:
-      rrintervals.append(this_value)
-      last_value = this_value
+      if (last_value == 0):
+        hrv_percentage = 0
+      else:
+        hrv_percentage = abs(100-(this_value*100/last_value))
+
+      # The soft and percentage filter
+      if ((last_value != 0 and project_conf_remove_hrv_abnormal) and (hrv_percentage > project_conf_remove_hrv_abnormal_threshold)):
+        rrintervals.append(last_value)
+      else:
+        rrintervals.append(this_value)
+        last_value = this_value
 
   return rrintervals
 
