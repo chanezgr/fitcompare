@@ -46,7 +46,7 @@ from fitcompare_advanced import *
 sns.set()
 
 # Define CONST
-SCRIPT_VER = "2.7.0 DEV"
+SCRIPT_VER = "2.7.0"
 # TODO: 
 # - Clean the filtering method of HRV
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
