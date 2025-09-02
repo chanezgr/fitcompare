@@ -46,12 +46,13 @@ from fitcompare_advanced import *
 sns.set()
 
 # Define CONST
-SCRIPT_VER = "2.7.0 DEV"
+SCRIPT_VER = "2.7.1 DEV"
 # TODO: 
 # - Clean the filtering method of HRV
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
+# 2.7.1: Fixed issue for map in projects where aligned = false
 # 2.7.0: Add support for 5hz GPS on Garmin FIT files, import HRV from Suunto JSON files and skip specific timestamps
 # 2.6.1: Add values in charts titles / Clean error if no HRV data / Remove "half last point" for SIGMA devices
 # 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
@@ -1200,14 +1201,14 @@ def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project
     gpx_data[ffile] = []
     for point in ff_data[ffile]:
       # If it's a 5hz GPS point
-      if (isinstance(point['position'][0]['long'], (tuple, list))):
+      if (('position' in point) and (isinstance(point['position'][0]['long'], (tuple, list)))):
           i = 0
           for gps_point in point['position'][0]['long']:
             if (gps_point is not None and point['position'][0]['lat'][i] is not None):
               gpx_data[ffile].append([gps_point * (180/pow(2,31)), point['position'][0]['lat'][i] * (180/pow(2,31))])
             i += 1
       # It's a standard point
-      elif ((point['position'][0]['long'] != None) and (point['position'][0]['lat'] != None)):
+      elif (('position' in point) and (point['position'][0]['long'] != None) and (point['position'][0]['lat'] != None)):
         gpx_data[ffile].append([point['position'][0]['long'] * (180/pow(2,31)), point['position'][0]['lat'] * (180/pow(2,31))])
     start_lat = ff_summary[ffile][15]
     start_long = ff_summary[ffile][16]
