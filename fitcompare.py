@@ -52,6 +52,8 @@ SCRIPT_VER = "2.7.1 DEV"
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
+# 2.7.1: Add new GNSS modes for COROS watches
+# 2.7.1: Add options to force color and alpha of GPS trace
 # 2.7.1: Fixed issue for map in projects where aligned = false
 # 2.7.0: Add support for 5hz GPS on Garmin FIT files, import HRV from Suunto JSON files and skip specific timestamps
 # 2.6.1: Add values in charts titles / Clean error if no HRV data / Remove "half last point" for SIGMA devices
@@ -101,6 +103,8 @@ project_conf_remove_hrv_abnormal = False
 project_conf_remove_hrv_abnormal_threshold = 20
 custom_graphs_values = []
 charge = {}
+traceColor = {}
+traceOpacity = {}
 conf_has_custom_graphs = False
 project_conf_inc_smoothed_alt = False
 
@@ -234,6 +238,12 @@ if (os.path.isfile(project_conf_file)):
       if "charge" in project_conf[ffile]:
         if (args.debug): print("[debug] Read configuration file: 'charge' value set to %i/%1 for file %s" % (project_conf[ffile]['charge'][0], project_conf[ffile]['charge'][1], ffile))
         charge[ffile] = project_conf[ffile]['charge']
+      if "traceColor" in project_conf[ffile]:
+        if (args.debug): print("[debug] Read configuration file: 'traceColor' value set to %s for file %s" % (project_conf[ffile]['traceColor'], ffile))
+        traceColor[ffile] = project_conf[ffile]['traceColor']
+      if "traceOpacity" in project_conf[ffile]:
+        if (args.debug): print("[debug] Read configuration file: 'traceOpacity' value set to %s for file %s" % (project_conf[ffile]['traceOpacity'], ffile))
+        traceOpacity[ffile] = project_conf[ffile]['traceOpacity']
 else:
   if (args.debug): print("[debug] No configuration file to open, continuing with defaults")
   
@@ -461,12 +471,14 @@ def loadFitHrv(fitname, hrvDelta):
 #    MakeModel:  Describe the make and model of the watch. 
 #    HRSource:   Describe the belt or sensor model. OHR means optical heart rate sensor of the watch
 #    GNSSConfig: Describe the GNSS configuration for the recoding. This can be:
-#                - SatIQ:    for Garmin SatIQ automatic
-#                - Ultra:    for UltraTrack or equivalent
-#                - GPS:      for GPS only
-#                - GNSS:     for all GNSS systems
-#                - GNSSDual: for all GNSS systems + GPS Multiband
-#                - Track:    for running mode specific for running track
+#                - SatIQ:      for Garmin SatIQ automatic
+#                - Ultra:      for UltraTrack or equivalent
+#                - GPS:        for GPS only
+#                - GNSS:       for all GNSS systems
+#                - GNSSDual:   for all GNSS systems + GPS Multiband
+#                - Track:      for running mode specific for running track
+#                - Endurance:  for COROS watches in Endurance mode
+#                - Max:        for COROS watches in multi-GNSS Dual
 #    DistanceSensor: Describe the distance sensor brand and model used (if any)
 # Return an array with labels for each part as follow:
 # [MakeModel, HRSource, GNSSConfig, DistanceSensor]
@@ -488,6 +500,12 @@ def decodeFitName(fitname):
     gnsssource = "Tous les systèmes GNSS et GPS Multibande"
   elif (fitnameparts[2] == "SatIQ"):
     gnsssource = "Mode GNSS et GPS Multibande automatique"
+  elif (fitnameparts[2] == "Endurance"):
+    gnsssource = "COROS Endurance, GNSS automatique"
+  elif (fitnameparts[2] == "High"):
+    gnsssource = "COROS High, mode multi-GNSS"
+  elif (fitnameparts[2] == "Max"):
+    gnsssource = "COROS Max, multi-GNSS et GPS Multibande"
   elif (fitnameparts[2] == "Track"):
     gnsssource = "Profil spécifique pour la piste"
   elif (fitnameparts[2] == "NONE"):
@@ -941,7 +959,7 @@ else:
 print("=========================================================================")
 
 # ==============
-# GRAPHS
+# Line GRAPHS
 def generateGraph(APP_PATH, project_prefix, compare_value, chartData, args, project_conf_align, chartTitle, hr_max_pos): 
   # Generate the graph
   pathlib.Path(APP_PATH + "pnggraphs").mkdir(exist_ok=True)
@@ -1192,7 +1210,7 @@ if (conf_has_custom_graphs):
     
     
 # Generate a GPS MAP
-def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project_conf_map_style, ff_summary, APP_PATH):
+def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project_conf_map_style, ff_summary, APP_PATH, traceColor, traceOpacity):
 
   print("Generating map")
   gpx_data = {}
@@ -1244,7 +1262,11 @@ def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project
   i=0
   for ffile in fitfiles:
     details = decodeFitName(ffile)
-    fmap.write('<div class="mapLegend" align="left" style="margin-right: 8px; padding-left: 70px;"><font color="%s">&#9679;</font>%s (Mode GNSS: %s)</div>\n' % (gpx_colors[i], details[0], details[2]))
+    # Set color for trace
+    thisTraceColor = gpx_colors[i]
+    if (ffile in traceColor):
+      thisTraceColor = traceColor[ffile]
+    fmap.write('<div class="mapLegend" align="left" style="margin-right: 8px; padding-left: 70px;"><font color="%s">&#9679;</font>%s (Mode GNSS: %s)</div>\n' % (thisTraceColor, details[0], details[2]))
     i+=1
   fmap.write('</div>\n')
   fmap.write('<script>\n')
@@ -1272,6 +1294,14 @@ def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project
 
   i = 0
   for ffile in fitfiles:
+    # Set color for trace
+    thisTraceColor = gpx_colors[i]
+    if (ffile in traceColor):
+      thisTraceColor = traceColor[ffile]
+    # Set opacity for trace
+    thisOpacity = 0.8
+    if (ffile in traceOpacity):
+      thisOpacity = traceOpacity[ffile]    
     fmap.write('map.addSource(\'route%i\', {\n' % (i))
     fmap.write('\'type\': \'geojson\',\n')
     fmap.write('\'data\': {\n')
@@ -1293,8 +1323,8 @@ def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project
     fmap.write('\'line-cap\': \'round\'\n')
     fmap.write('},\n')
     fmap.write('\'paint\': {\n')
-    fmap.write('\'line-color\': \'%s\',\n' % (gpx_colors[i]))
-    fmap.write('\'line-opacity\': 0.8,\n')
+    fmap.write('\'line-color\': \'%s\',\n' % (thisTraceColor))
+    fmap.write('\'line-opacity\': %f,\n' % (thisOpacity))
     fmap.write('\'line-width\': 4\n')
     fmap.write('}});\n')
     i += 1
@@ -1305,7 +1335,7 @@ def generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project
 
 # Generate Mapbox map if map is enabled
 if (project_conf_map):
-  generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project_conf_map_style, ff_summary, APP_PATH)
+  generateMapboxMap(fitfiles, ff_data, project_prefix, MAPBOX_API_KEY, project_conf_map_style, ff_summary, APP_PATH, traceColor, traceOpacity)
 
 # Generate an example config file
 # Get all sessions if more than 1
@@ -1361,4 +1391,6 @@ for ffile in fitfiles:
   fexconf.write('#  charge: [99, 87]\n')
   fexconf.write('#  hrvCsv: polar_hrv.csv\n')
   fexconf.write('#  hrvCsv: polar_hrv.csv\n')
+  fexconf.write('#  traceColor: blue\n')
+  fexconf.write('#  traceOpacity: 0.8\n')
 fexconf.close()
