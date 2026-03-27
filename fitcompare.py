@@ -46,12 +46,13 @@ from fitcompare_advanced import *
 sns.set()
 
 # Define CONST
-SCRIPT_VER = "2.7.0"
+SCRIPT_VER = "2.7.1"
 # TODO: 
 # - Clean the filtering method of HRV
 # - Create a configuration line on the project.yaml to remove the gray dotted line on HR chart
 # 
 # CHANGELOG:
+# 2.7.1: Fix a bug if some altitude value are "None"
 # 2.7.0: Add support for 5hz GPS on Garmin FIT files, import HRV from Suunto JSON files and skip specific timestamps
 # 2.6.1: Add values in charts titles / Clean error if no HRV data / Remove "half last point" for SIGMA devices
 # 2.6.0: Add hrvCsv option for fit files in order to provide a separate HRV CSV file (specific for Polar watches)
@@ -314,6 +315,9 @@ def loadFitData(fitname, summary, fields):
   
   # Keep previous value for rare cases where heart_rate contains None for one point
   hr_previous_value = 0
+
+  # Keep previous value for rare cases where altitude contains None for one point
+  alt_previous_value = 0
   
   i = 0
   all_file_values = []
@@ -339,8 +343,13 @@ def loadFitData(fitname, summary, fields):
           for possible_field in priority_fields[value]:
             if (record.get_value(possible_field) != None):
               this_single_value = record.get_value(possible_field)
+              if (possible_field == "altitude" or possible_field == "enhanced_altitude"):
+                alt_previous_value = this_single_value
               break
-          this_value[value] = this_single_value
+          if (possible_field == "altitude" or possible_field == "enhanced_altitude"):
+            this_value[value] = alt_previous_value
+          else:
+            this_value[value] = this_single_value
         # If field is position, put an array instead of a single value:
         elif (value == 'position'):
           this_value[value] = []
