@@ -31,7 +31,7 @@ This way, I can run only "fitcompare OPTIONS" in the directory where FIT files a
 ```
 usage: fitcompare.py [-h] [--reference-file REFERENCE_FILE]
                      [--prefix PROJECT_PREFIX] [--debug] [--export]
-                     [--config PROJECT_CONFIG]
+                     [--config PROJECT_CONFIG] [--listfields] [--gen-config]
                      FITFILE [FITFILE ...]
 
 Compare two or more FIT files
@@ -49,6 +49,9 @@ options:
   --export, -e          Export graphs values also as CSV
   --config, -c PROJECT_CONFIG
                         Use an alternative configuration YAML file
+  --listfields, -l      List all fields for FITFILE
+  --gen-config, -g      Generate an example project.yaml.example from the FIT
+                        files, then exit
 ```
 
 ## Name of the FIT files
@@ -74,7 +77,8 @@ Example:
 ## Configuration YAML file
 
 In addition to command line, options can be configured in the project.yaml in the same directory.
-After each successful run, a new project.yaml.example is generated with example values
+Run `fitcompare --gen-config FITFILE [FITFILE ...]` to generate a `project.yaml.example` pre-filled
+with example values from your FIT files (rename it to `project.yaml` to use it).
 
 ```
 project: # This is a section that configure global aspects of the project

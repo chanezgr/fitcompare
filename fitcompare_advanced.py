@@ -1,86 +1,85 @@
+"""
+Advanced heart-rate analysis for fitcompare.
+
+The public entry point is ``compute_hr_score``: given the reference and
+candidate heart-rate series *already aligned on the common timestamps*, it
+reproduces the legacy latency-compensated gap scoring in a single O(n) pass
+(the previous implementation was O(n^2) because it re-scanned the whole
+reference list for every point).
+"""
+
 import numpy as np
 
-# This function find the closest value to "value" in "array"
-def find_nearest_value(array, value):
-  array = np.asarray(array)
-  idx = (np.abs(array - value)).argmin()
-  return array[idx]
 
-# This function uses the find_nearest_value in order to compensate latency of HR measurement or slight misalignments
-def reduce_latency(ff_data, reference_file, a_position, value):
+def _nearest_value(window, value):
+  """Return the element of ``window`` closest to ``value`` (legacy find_nearest_value)."""
+  window = np.asarray(window, dtype=float)
+  return float(window[np.abs(window - value).argmin()])
+
+
+def compute_hr_score(ref_hr, cand_hr, start_index=59, latency=5):
+  """Compute the heart-rate comparison score between two aligned series.
+
+  Parameters
+  ----------
+  ref_hr, cand_hr : sequence of float
+      Heart-rate values of the reference and candidate files, aligned point by
+      point on the common timestamps (same length).
+  start_index : int
+      0-based index of the first point taken into account (legacy started the
+      analysis at the 60th point, i.e. 0-based index 59).
+  latency : int
+      Size of the backward window used to compensate HR measurement latency
+      (legacy looked at the last 5 seconds).
+
+  Returns
+  -------
+  dict or None
+      ``None`` if no point could be scored, otherwise a dict with keys
+      ``average_gap``, ``max_gap``, ``max_gap_position`` and ``hr_score``.
   """
-  This function search in the last 5 seconds the closest value to "value"
-  """
-  slice_hr = []
-  
-  if (a_position < 5):
-    slice = ff_data[reference_file][:a_position]
-    for record in slice:
-      slice_hr.append(record['heart_rate'])
-  else:
-    slice = ff_data[reference_file][a_position-5:a_position]
-    for record in slice:
-      slice_hr.append(record['heart_rate'])
-  
-  nv = find_nearest_value(slice_hr, value)
-  return nv
-  
-# This function get the HR value at a timestamp, and for the next 4 seconds
-# Input:
-# - file_data: array of value for a fit file
-# - the specific timestamp to compare
-# Output:
-# - The HR for the specific timestamp
-def get_bpm_ts(file_data, timestamp):
-  # Loop over all data
-  for point in file_data:
-    cur_ts = point['timestamp']
-    if (cur_ts == timestamp):
-      if (point['heart_rate'] != None):
-        return point['heart_rate']
-      elif (prev_bpm != None):
-        return prev_bpm
-      else:
-        return 0
-    prev_bpm = point['heart_rate']
+  gaps = []
+  max_gap = 0
+  max_gap_position = None
 
-# This function handles a new HR comparison point
-def bpm_new_point(cur_bpm, ts, average_hr_gap, ff_data, reference_file, a_position):
-  ref_bpm = get_bpm_ts(ff_data[reference_file], ts)
-  if ((ref_bpm != 0) and (ref_bpm != None)):
-    closest_value = reduce_latency(ff_data, reference_file, a_position, cur_bpm)
-    # Compute this point gap
-    bpm_gap = abs(cur_bpm - closest_value)
-    # Add this point gap to array
-    average_hr_gap['average'].append(bpm_gap)
-    # If the gap is greater than previous gap, it's a new bigger one
-    if (bpm_gap > average_hr_gap['max']):
-      average_hr_gap['max'] = bpm_gap
-      average_hr_gap['max_position'] = a_position
-      #print("%i - %i" % (a_position, bpm_gap))
-  return average_hr_gap
+  for pos in range(len(cand_hr)):
+    if pos < start_index:
+      continue
+    ref_bpm = ref_hr[pos]
+    # Skip points where the reference has no usable value (legacy get_bpm_ts)
+    if ref_bpm is None or ref_bpm == 0:
+      continue
+    # Closest reference value within the latency window (legacy reduce_latency:
+    # ff_data[ref][pos-latency+1 : pos+1], i.e. the current point and the
+    # previous `latency-1` ones).
+    window = ref_hr[max(0, pos - latency + 1):pos + 1]
+    gap = abs(cand_hr[pos] - _nearest_value(window, cand_hr[pos]))
+    gaps.append(gap)
+    if gap > max_gap:
+      max_gap = gap
+      # Legacy stored a_position == i == pos + 1 (1-based)
+      max_gap_position = pos + 1
 
-def adv_hr_sum(average_hr_gap):
-  # Average BPM diff:
-  avg_bpm_gap_final = sum(average_hr_gap['average']) / len(average_hr_gap['average']) 
-  # Score of average bpm
-  if (avg_bpm_gap_final <= 0.5):
-    avg_bpm_coef = 0
-  else:
-    avg_bpm_coef = abs(avg_bpm_gap_final) - 0.5
-  hr_gap_score = avg_bpm_coef*10
-  if (hr_gap_score >= 60):
-    hr_gap_score = 60
-  if (average_hr_gap['max'] <= 80):
-    max_bpm_gap_score = abs(average_hr_gap['max']/1.7)
-  else:
-    max_bpm_gap_score = 50
+  if not gaps:
+    return None
 
-  hr_score = 100 - (hr_gap_score + max_bpm_gap_score)
-  
-  returnValues = {}
-  returnValues['average_gap'] = avg_bpm_gap_final
-  returnValues['max_gap'] = average_hr_gap['max']
-  returnValues['max_gap_position'] = average_hr_gap['max_position']
-  returnValues['hr_score'] = hr_score
-  return returnValues
+  return _summarize(gaps, max_gap, max_gap_position)
+
+
+def _summarize(gaps, max_gap, max_gap_position):
+  """Turn the collected gaps into the final score (legacy adv_hr_sum)."""
+  average_gap = sum(gaps) / len(gaps)
+
+  # Average-gap penalty: nothing below 0.5 bpm, then 10 points per bpm, capped at 60
+  avg_coef = 0 if average_gap <= 0.5 else abs(average_gap) - 0.5
+  avg_gap_score = min(avg_coef * 10, 60)
+
+  # Max-gap penalty: proportional up to 80 bpm, then capped at 50
+  max_gap_score = abs(max_gap / 1.7) if max_gap <= 80 else 50
+
+  return {
+    'average_gap': average_gap,
+    'max_gap': max_gap,
+    'max_gap_position': max_gap_position,
+    'hr_score': 100 - (avg_gap_score + max_gap_score),
+  }
