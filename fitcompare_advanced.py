@@ -1,14 +1,31 @@
 """
-Advanced heart-rate analysis for fitcompare.
+Advanced heart-rate and GPS analysis for fitcompare.
 
-The public entry point is ``compute_hr_score``: given the reference and
-candidate heart-rate series *already aligned on the common timestamps*, it
-reproduces the legacy latency-compensated gap scoring in a single O(n) pass
-(the previous implementation was O(n^2) because it re-scanned the whole
-reference list for every point).
+The public entry points are ``compute_hr_score`` and ``compute_gps_score``:
+
+* ``compute_hr_score``: given the reference and candidate heart-rate series
+  *already aligned on the common timestamps*, it reproduces the legacy
+  latency-compensated gap scoring in a single O(n) pass (the previous
+  implementation was O(n^2) because it re-scanned the whole reference list for
+  every point).
+
+* ``compute_gps_score``: given the candidate FIT GPS points and an absolute
+  GPX reference trace, it finds the nearest GPX point for every FIT point,
+  applies a 1 m tolerance (retained gap = max(0, dist_cm - 100)) and derives a
+  score mirroring the HR one. The nearest-point search uses a KD-tree built on
+  an equirectangular projection (meters), which is accurate enough for the
+  cm-level, local-area comparisons this tool is designed for.
 """
 
+import math
+
 import numpy as np
+from scipy.spatial import cKDTree
+
+# Mean Earth radius used for the equirectangular projection (meters)
+EARTH_RADIUS_M = 6371000.0
+# Free GPS tolerance: the first 112cm of every point-to-point gap is ignored
+GPS_MARGIN_CM = 112.0
 
 
 def _nearest_value(window, value):
@@ -82,4 +99,93 @@ def _summarize(gaps, max_gap, max_gap_position):
     'max_gap': max_gap,
     'max_gap_position': max_gap_position,
     'hr_score': 100 - (avg_gap_score + max_gap_score),
+  }
+
+
+def _to_xy(coords, lat0_rad):
+  """Equirectangular projection of (lat_deg, lon_deg) pairs to planar meters."""
+  lat = np.radians(coords[:, 0])
+  lon = np.radians(coords[:, 1])
+  x = lon * EARTH_RADIUS_M * math.cos(lat0_rad)
+  y = lat * EARTH_RADIUS_M
+  return np.column_stack([x, y])
+
+
+def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM):
+  """Compute the GPS comparison score of a FIT trace against a GPX reference.
+
+  Parameters
+  ----------
+  fit_coords : sequence of (lat_deg, lon_deg)
+      GPS points of one FIT file, in the same order as the records (so the
+      per-point gap array stays aligned with the other graphs' x-axis). Points
+      with no fix are represented by (nan, nan) and are skipped.
+  gpx_coords : sequence of (lat_deg, lon_deg)
+      Every track point of the GPX reference trace.
+  margin_cm : float
+      Free tolerance applied per point: retained_gap = max(0, dist_cm - margin).
+      Defaults to 112cm which is one meter at the max 50cm of the nearest point
+
+  Returns
+  -------
+  dict or None
+      ``None`` if the FIT file has no usable fix or the GPX trace is empty,
+      otherwise a dict with keys:
+
+      * ``average_gap``  - mean of the retained gaps (cm)
+      * ``max_gap``      - largest retained gap (cm)
+      * ``max_gap_position`` - 1-based index of the largest gap in ``gaps``
+      * ``gps_score``    - score on 100 (100 = perfect)
+      * ``gaps``         - per-point retained gaps (cm), NaN where no fix
+      * ``raw_dists``    - per-point raw distances (cm) to the nearest GPX pt
+  """
+  n = len(fit_coords)
+  gaps = [float('nan')] * n
+  raw_dists = [float('nan')] * n
+
+  valid_idx = [i for i, c in enumerate(fit_coords)
+              if c is not None and len(c) == 2
+              and c[0] == c[0] and c[1] == c[1]   # not NaN
+              and c[0] != 0.0 and c[1] != 0.0]
+  if not valid_idx or len(gpx_coords) == 0:
+    return None
+
+  gpx = np.asarray(gpx_coords, dtype=float)
+  fit_valid = np.asarray([fit_coords[i] for i in valid_idx], dtype=float)
+  lat0 = math.radians(float(np.mean(gpx[:, 0])))
+  tree = cKDTree(_to_xy(gpx, lat0))
+  dists_m, _ = tree.query(_to_xy(fit_valid, lat0))
+  dists_cm = dists_m * 100.0
+
+  retained = []
+  for k, i in enumerate(valid_idx):
+    cm = float(dists_cm[k])
+    raw_dists[i] = cm
+    gap = cm - margin_cm
+    if gap < 0:
+      gap = 0.0
+    gaps[i] = gap
+    retained.append(gap)
+
+  average_gap = float(sum(retained) / len(retained))
+  max_gap = float(max(retained))
+  max_gap_position = valid_idx[int(np.argmax(retained))] + 1  # 1-based, like HR
+
+  # GPS score (cm units after the 1 m margin). The average gap drives most of the
+  # penalty; the max gap is penalized gently so a single spike does not tank the
+  # whole score. Calibrated so a good watch trace (avg ~85 cm, max ~4 m) scores
+  # around 85%. The coefs are 1.6x the 90%-calibration: the mapping is linear
+  # (new = 100 - 1.6 * (100 - old)), so 90% -> 84% while 100% stays 100%.
+  # - average-gap penalty: 0.1 pt/cm (10 pts per metre), capped at 45
+  # - max-gap penalty:     0.006 pt/cm (0.6 pt per metre), capped at 45
+  avg_penalty = min(average_gap * 0.1, 45)
+  max_penalty = min(max_gap * 0.006, 45)
+
+  return {
+    'average_gap': average_gap,
+    'max_gap': max_gap,
+    'max_gap_position': max_gap_position,
+    'gps_score': 100 - (avg_penalty + max_penalty),
+    'gaps': gaps,
+    'raw_dists': raw_dists,
   }

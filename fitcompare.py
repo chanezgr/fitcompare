@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
 import fitparse
@@ -44,13 +45,18 @@ import seaborn as sns
 import yaml
 from scipy.signal import savgol_filter
 
-from fitcompare_advanced import compute_hr_score
+from fitcompare_advanced import compute_hr_score, compute_gps_score
 
 # #############################
 # CONSTANTS
 
-SCRIPT_VER = "3.0.0"
+SCRIPT_VER = "3.1.0"
 # CHANGELOG:
+# 3.1.0: Add --gpx-ref / -G: an absolute GPX trace used as GPS reference for the
+#        FIT files. Each FIT GPS point is matched to the nearest GPX point, a
+#        1 m tolerance is applied (retained gap = max(0, dist_cm - 100)), and a
+#        GPS score (mirroring the HR score) plus per-point cm deviation and the
+#        max deviation are reported and plotted.
 # 3.0.0: Entire cide refactoring, replacing spaghetti code
 #        Improvement: single FIT parse, full pandas-backed data model
 #        Improvement: vectorized alignment/scores, structured functions. 
@@ -92,6 +98,7 @@ class Config:
   fitfiles: list = field(default_factory=list)
   reference_file: str = None
   with_reference_file: bool = False
+  gpx_ref: str = None
   project_prefix: str = ''
   debug: bool = False
   export: bool = False
@@ -106,6 +113,7 @@ class Config:
   altitude_gap: int = 1
   map: bool = True
   map_style: str = 'satellite-streets-v12'
+  draw_gpx_ref: bool = False
   values_to_compare: list = field(default_factory=lambda: ['heart_rate', 'altitude', 'distance'])
   remove_hrv_abnormal: bool = False
   remove_hrv_abnormal_threshold: int = 20
@@ -131,6 +139,8 @@ def parse_args():
   parser = argparse.ArgumentParser(description='Compare two or more FIT files')
   parser.add_argument('fitfilesarg', metavar='FITFILE', nargs='+', help='Fit Files to compare')
   parser.add_argument('--reference-file', '-r', dest='reference_file', help='Set the reference FIT File')
+  parser.add_argument('--gpx-ref', '-G', dest='gpx_ref',
+                      help='GPX file used as absolute GPS reference for the FIT files')
   parser.add_argument('--prefix', '-p', dest='project_prefix', help='Set the project prefix for output files')
   parser.add_argument('--debug', '-d', action='store_true', help='Enable debug')
   parser.add_argument('--export', '-e', action='store_true', help='Export graphs values also as CSV')
@@ -150,6 +160,9 @@ def load_config(args):
   cfg.gen_config = args.gen_config
   cfg.reference_file = args.reference_file
   cfg.with_reference_file = args.reference_file is not None
+  cfg.gpx_ref = args.gpx_ref
+  if cfg.gpx_ref:
+    cfg.dbg("GPX reference trace set to " + cfg.gpx_ref)
   cfg.project_prefix = args.project_prefix if args.project_prefix is not None else ''
 
   if cfg.debug:
@@ -197,6 +210,7 @@ def _apply_project_section(cfg):
     'altitudeGap': 'altitude_gap',
     'map': 'map',
     'mapStyle': 'map_style',
+    'drawGpxRef': 'draw_gpx_ref',
     'graphs': 'values_to_compare',
     'removeAbnormalHrv': 'remove_hrv_abnormal',
     'removeAbnormalHrvThreshold': 'remove_hrv_abnormal_threshold',
@@ -604,6 +618,79 @@ def load_fit_hrv(ffile, cfg, delta):
 
 
 # #############################
+# GPS REFERENCE (GPX)
+
+def load_gpx(gpx_file):
+  """Parse a GPX file and return its track points as a list of (lat_deg, lon_deg)."""
+  tree = ET.parse(APP_PATH + gpx_file)
+  root = tree.getroot()
+  # GPX elements are namespaced; iterate namespace-agnostically on 'trkpt'.
+  ns = ''
+  if root.tag.startswith('{'):
+    ns = root.tag.split('}')[0] + '}'
+  coords = []
+  for pt in root.iter(ns + 'trkpt'):
+    lat = pt.get('lat')
+    lon = pt.get('lon')
+    if lat is not None and lon is not None:
+      coords.append((float(lat), float(lon)))
+  return coords
+
+
+def _fit_gps_coords(frame):
+  """Return the per-record (lat_deg, lon_deg) list of one aligned file's GPS fix.
+
+  Points without a fix are (nan, nan) so the per-point gap array stays aligned
+  with the other graphs' x-axis. Only the 1 Hz record fixes are used here (the
+  5 Hz Garmin bursts are a map-only expansion).
+  """
+  coords = []
+  if 'position_lat' in frame.columns and 'position_long' in frame.columns:
+    for lat, lon in zip(frame['position_lat'].tolist(), frame['position_long'].tolist()):
+      if pd.notna(lat) and pd.notna(lon):
+        coords.append((lat * SEMICIRCLE_TO_DEG, lon * SEMICIRCLE_TO_DEG))
+      else:
+        coords.append((float('nan'), float('nan')))
+  return coords
+
+
+def compute_gps_scores(fitdatas, aligned, cfg, gpx_coords):
+  """Compute the GPS score of every FIT file against the GPX reference trace."""
+  scores = {}
+  for ffile in fitdatas:
+    fit_coords = _fit_gps_coords(aligned.frames[ffile])
+    score = compute_gps_score(fit_coords, gpx_coords)
+    if score is None:
+      print("GPS Score: %s has no usable GPS fix (skipped)" % ffile)
+      continue
+    scores[ffile] = score
+    print("GPS Score: %s - Ecart moyen: %.1f cm - Ecart max: %.1f cm - Score: %.1f%%"
+          % (ffile, score['average_gap'], score['max_gap'], score['gps_score']))
+  return scores
+
+
+def generate_gps_graph(gps_scores, aligned, fitdatas, cfg):
+  """Plot the per-point retained GPS deviation (cm) of each file vs the GPX ref."""
+  print("Generating data for gps")
+  chart_data = {}
+  vlines = []
+  for ffile in fitdatas:
+    score = gps_scores.get(ffile)
+    if score is None:
+      continue
+    gaps = list(score['gaps'])
+    if len(gaps) < aligned.max_points:
+      gaps = gaps + [float('nan')] * (aligned.max_points - len(gaps))
+    tags = decode_fit_name(ffile)
+    legend = "%s (Ecart moyen: %.1f cm - Ecart max: %.1f cm - Score GPS: %.1f%%)" % (
+      tags[0], score['average_gap'], score['max_gap'], score['gps_score'])
+    chart_data[legend] = gaps
+    vlines.append(score['max_gap_position'])
+  _render_chart(chart_data, "Analyse de l'ecart GPS vs trace de reference (cm)",
+                _graph_path('gps', cfg), cfg, aligned.max_points, vlines=vlines)
+
+
+# #############################
 # TEXT REPORT
 
 def _battery_projection(summary):
@@ -617,7 +704,7 @@ def _battery_projection(summary):
   return rate, int(projection), (projection * 60) % 60
 
 
-def build_report(fitdatas, cfg, alt_norms):
+def build_report(fitdatas, cfg, alt_norms, gps_scores=None):
   """Build the human-readable text report (identical layout to the legacy output)."""
   out = []
   for idx, (ffile, fd) in enumerate(fitdatas.items(), start=1):
@@ -664,6 +751,11 @@ def build_report(fitdatas, cfg, alt_norms):
       out.append(" Battery level start / end:    %.2f / %.2f\n" % (s.start_battery, s.end_battery))
       if rate is not None and proj_h is not None:
         out.append(" Battery burn rate:            %.2f%%/hr (projection: %02dh%02d)\n" % (rate, proj_h, proj_m))
+    if gps_scores and ffile in gps_scores:
+      gs = gps_scores[ffile]
+      out.append(" GPS score (vs GPX ref):       %.1f%%\n" % gs['gps_score'])
+      out.append(" GPS ecart moyen / max:        %.1f cm / %.1f cm @ point %i\n"
+                 % (gs['average_gap'], gs['max_gap'], gs['max_gap_position']))
     out.append("=========================================================================\n\n")
 
   out.extend(_build_project_report(fitdatas, cfg))
@@ -683,6 +775,7 @@ def _build_project_report(fitdatas, cfg):
   out.append(" Zoom on certain points:             %s\n" % cfg.zoom)
   if cfg.zoom:
     out.append(" Zoom from / to:                     %i / %i\n" % (cfg.zoom_range[0], cfg.zoom_range[1]))
+  out.append(" GPX reference trace:                %s\n" % (cfg.gpx_ref if cfg.gpx_ref else "none"))
   out.append("-------------------------------------------------------------------------\n")
   for ffile in fitdatas:
     out.append(" Configuration values for %s\n" % ffile)
@@ -937,7 +1030,24 @@ def _map_route_js(index, coords):
           + "map.addLayer(%s);\n" % json.dumps(layer))
 
 
-def generate_map(fitdatas, aligned, cfg, mapbox_key):
+def _map_gpx_ref_js(coords):
+  """GeoJSON source + dashed black line layer for the GPX reference trace."""
+  source = {'type': 'geojson', 'data': {'type': 'Feature', 'properties': {},
+            'geometry': {'type': 'LineString', 'coordinates': coords}}}
+  layer = {'id': 'gpxRef', 'type': 'line', 'source': 'gpxRef',
+           'layout': {'line-join': 'round', 'line-cap': 'round'},
+           'paint': {'line-color': '#000000', 'line-opacity': 0.9, 'line-width': 3,
+                     'line-dasharray': [2, 2]}}
+  return ("map.addSource('gpxRef', %s);\n" % json.dumps(source)
+          + "map.addLayer(%s);\n" % json.dumps(layer))
+
+
+def _map_gpx_ref_legend():
+  return ('<div class="mapLegend" align="left" style="margin-right: 8px; padding-left: 70px;">'
+          '<font color="#000000">&#9679;</font>GPX (trace de reference)</div>\n')
+
+
+def generate_map(fitdatas, aligned, cfg, mapbox_key, gpx_coords=None):
   print("Generating map")
   files = list(fitdatas)
   routes = [_route_coordinates(fd, aligned, cfg) for fd in fitdatas.values()]
@@ -952,12 +1062,18 @@ def generate_map(fitdatas, aligned, cfg, mapbox_key):
 
   html = [_MAP_HEAD]
   html += [_map_legend(i, f) for i, f in enumerate(files)]
+  if cfg.draw_gpx_ref and gpx_coords:
+    html.append(_map_gpx_ref_legend())
   html.append('</div>\n<script>\n')
   html.append("mapboxgl.accessToken = '%s';\n" % mapbox_key)
   html.append("var map = new mapboxgl.Map(%s);\n" % json.dumps(map_init))
   html.append(_MAP_TERRAIN)
   html.append("map.on('load', function () {\n")
   html += [_map_route_js(i, coords) for i, coords in enumerate(routes)]
+  if cfg.draw_gpx_ref and gpx_coords:
+    # GPX points are stored as (lat, lon); the map expects [lon, lat]
+    ref_coords = [[round(lon, 6), round(lat, 6)] for lat, lon in gpx_coords]
+    html.append(_map_gpx_ref_js(ref_coords))
   html.append('});\n</script>\n</body>\n</html>\n')
 
   pathlib.Path(APP_PATH + "map").mkdir(exist_ok=True)
@@ -994,6 +1110,7 @@ def generate_example_config(fitdatas, cfg, common_count):
     out.write('  altitudeGap: 8  # Seconds\n')
     out.write('  map: false\n')
     out.write('  mapStyle: outdoors-v12\n')
+    out.write('  drawGpxRef: false # Draw the --gpx-ref trace on the map (dashed black)\n')
     out.write('  graphs: [\'heart_rate\', \'altitude\', \'distance\']\n')
     out.write('  includeSmoothedAlt: false\n')
     out.write('  removeAbnormalHrv: false\n')
@@ -1045,8 +1162,19 @@ def main():
   # D+/D- computed once, on the aligned data, and reused by report + legends
   alt_norms = compute_alt_norms(aligned, fitdatas, cfg)
 
+  # GPS reference (GPX): score every FIT file against the absolute trace
+  gps_scores = None
+  gpx_coords = None
+  if cfg.gpx_ref:
+    gpx_coords = load_gpx(cfg.gpx_ref)
+    cfg.dbg("GPX reference trace loaded with %i points" % len(gpx_coords))
+    if gpx_coords:
+      gps_scores = compute_gps_scores(fitdatas, aligned, cfg, gpx_coords)
+    else:
+      print("WARNING: GPX reference file %s contains no track points" % cfg.gpx_ref)
+
   # Text report
-  report = build_report(fitdatas, cfg, alt_norms)
+  report = build_report(fitdatas, cfg, alt_norms, gps_scores=gps_scores)
   write_logfile(report, cfg)
   if cfg.align:
     print(" Common timestamps:                  %i" % aligned.max_points)
@@ -1059,10 +1187,12 @@ def main():
     cfg.dbg("Configuring output for field %s" % compare_value)
     generate_standard_graph(compare_value, aligned, fitdatas, cfg, alt_norms)
   generate_custom_graphs(aligned, fitdatas, cfg)
+  if gps_scores:
+    generate_gps_graph(gps_scores, aligned, fitdatas, cfg)
 
   # Map
   if cfg.map:
-    generate_map(fitdatas, aligned, cfg, mapbox_key)
+    generate_map(fitdatas, aligned, cfg, mapbox_key, gpx_coords=gpx_coords)
 
 
 if __name__ == "__main__":
