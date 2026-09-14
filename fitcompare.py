@@ -75,7 +75,7 @@ SEMICIRCLE_TO_DEG = 180 / pow(2, 31)
 # This script runs in a container. Working directory (mounted dir).
 APP_PATH = "/project/"
 # Colors used for the map routes
-GPX_COLORS = ['#0000ff', '#ff0000', '#00ff00', '#bf00ff', '#6e6e6e', '#D7DF01',
+GPX_COLORS = ['#0000ff', '#ff0000', '#bf00ff', '#6e6e6e', '#D7DF01', '#D392FC',
               '#A9BCF5', '#A9F5A9', '#F5A9A9', '#000000', '#01DFD7', '#F5A9E1',
               '#FF8000', '#08088A']
 # Fields whose graph values should be rendered as integers (as the legacy code did)
@@ -113,7 +113,7 @@ class Config:
   altitude_gap: int = 1
   map: bool = True
   map_style: str = 'satellite-streets-v12'
-  draw_gpx_ref: bool = False
+  draw_gpx_ref: bool = True
   values_to_compare: list = field(default_factory=lambda: ['heart_rate', 'altitude', 'distance'])
   remove_hrv_abnormal: bool = False
   remove_hrv_abnormal_threshold: int = 20
@@ -482,6 +482,12 @@ def decode_fit_name(fitname):
     "SatIQ": "Mode GNSS et GPS Multibande automatique",
     "Track": "Profil spécifique pour la piste",
     "NONE": "Non spécifié",
+    "PRECISION": "COROS multi-GNSS",
+    "MAX": "COROS multi-GNSS + double fréquence",
+    "AUTO": "Mode automatique",
+    "GarminPrecision": "Mode double fréquence automatique",
+    "GarminStandard": "Multi-GNSS",
+    "GarminBatterie": "GPS seul (UltraTrac)",
   }
   gnsssource = gnss_labels.get(parts[2])
   distancesource = parts[3] if len(parts) == 4 else None
@@ -990,10 +996,28 @@ _MAP_HEAD = """<html lang="en">
 <style>
 body { font-family: 'Montserrat'; font-size: 16px; }
 .mapLegend { font-family: 'Montserrat'; font-size: 16px; }
+.style-selector {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 10;
+    font-family: 'Montserrat';
+    padding: 5px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    background: white;
+}
 </style>
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-compare/v0.4.0/mapbox-gl-compare.css" type="text/css"></head><body>
-<br><br><div align="center" style="width: 1200px; height: 800px; padding-left: 30px;">
-<div align="center" id="mapid" style="width: 100%; height: 680px;"></div>
+<br><br><div align="center" style="width: 1800px; height: 900px; padding-left: 30px;">
+<select id="style-selector" class="style-selector">
+    <option value="satellite-streets-v12">Satellite Streets</option>
+    <option value="streets-v12">Streets</option>
+    <option value="outdoors-v12">Outdoors</option>
+    <option value="light-v11">Light</option>
+    <option value="dark-v11">Dark</option>
+</select>
+<div align="center" id="mapid" style="width: 100%; height: 900px;"></div>
 <div align="left">
 """
 
@@ -1012,11 +1036,12 @@ map.addControl(new mapboxgl.FullscreenControl());
 """
 
 
-def _map_legend(index, ffile):
+def _map_legend(index, ffile, gps_score=None):
   tags = decode_fit_name(ffile)
+  score_str = " - Score GPS: %.1f%%" % gps_score if gps_score is not None else ""
   return ('<div class="mapLegend" align="left" style="margin-right: 8px; padding-left: 70px;">'
-          '<font color="%s">&#9679;</font>%s (Mode GNSS: %s)</div>\n'
-          % (GPX_COLORS[index], tags[0], tags[2]))
+          '<font color="%s">&#9679;</font>%s (Mode GNSS: %s%s)</div>\n'
+          % (GPX_COLORS[index], tags[0], tags[2], score_str))
 
 
 def _map_route_js(index, coords):
@@ -1024,30 +1049,43 @@ def _map_route_js(index, coords):
   source = {'type': 'geojson', 'data': {'type': 'Feature', 'properties': {},
             'geometry': {'type': 'LineString', 'coordinates': coords}}}
   layer = {'id': 'route%i' % index, 'type': 'line', 'source': 'route%i' % index,
-           'layout': {'line-join': 'round', 'line-cap': 'round'},
-           'paint': {'line-color': GPX_COLORS[index], 'line-opacity': 0.8, 'line-width': 4}}
+            'layout': {'line-join': 'round', 'line-cap': 'round'},
+            'paint': {'line-color': GPX_COLORS[index], 'line-opacity': 0.8, 'line-width': 4}}
   return ("map.addSource('route%i', %s);\n" % (index, json.dumps(source))
-          + "map.addLayer(%s);\n" % json.dumps(layer))
+           + "map.addLayer(%s);\n" % json.dumps(layer))
+
+
+def _map_max_gap_js(index, coords):
+  """GeoJSON source + circle layer for the point of maximum GPS gap."""
+  source = {'type': 'geojson', 'data': {'type': 'Feature', 'properties': {},
+            'geometry': {'type': 'Point', 'coordinates': coords}}}
+  layer = {'id': 'maxgap%i' % index, 'type': 'circle', 'source': 'maxgap%i' % index,
+            'paint': {'circle-color': GPX_COLORS[index], 'circle-radius': 6,
+                      'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff'}}
+  return ("map.addSource('maxgap%i', %s);\n" % (index, json.dumps(source))
+           + "map.addLayer(%s);\n" % json.dumps(layer))
+
 
 
 def _map_gpx_ref_js(coords):
-  """GeoJSON source + dashed black line layer for the GPX reference trace."""
+  """GeoJSON source + dashed green line layer for the GPX reference trace."""
   source = {'type': 'geojson', 'data': {'type': 'Feature', 'properties': {},
             'geometry': {'type': 'LineString', 'coordinates': coords}}}
   layer = {'id': 'gpxRef', 'type': 'line', 'source': 'gpxRef',
-           'layout': {'line-join': 'round', 'line-cap': 'round'},
-           'paint': {'line-color': '#000000', 'line-opacity': 0.9, 'line-width': 3,
-                     'line-dasharray': [2, 2]}}
+            'layout': {'line-join': 'round', 'line-cap': 'round'},
+            'paint': {'line-color': '#00ff00', 'line-opacity': 0.9, 'line-width': 3,
+                      'line-dasharray': [2, 2]}}
   return ("map.addSource('gpxRef', %s);\n" % json.dumps(source)
-          + "map.addLayer(%s);\n" % json.dumps(layer))
+           + "map.addLayer(%s);\n" % json.dumps(layer))
+
 
 
 def _map_gpx_ref_legend():
   return ('<div class="mapLegend" align="left" style="margin-right: 8px; padding-left: 70px;">'
-          '<font color="#000000">&#9679;</font>GPX (trace de reference)</div>\n')
+          '<font color="#00ff00">&#9679;</font>GPX (trace de reference)</div>\n')
 
 
-def generate_map(fitdatas, aligned, cfg, mapbox_key, gpx_coords=None):
+def generate_map(fitdatas, aligned, cfg, mapbox_key, gpx_coords=None, gps_scores=None):
   print("Generating map")
   files = list(fitdatas)
   routes = [_route_coordinates(fd, aligned, cfg) for fd in fitdatas.values()]
@@ -1061,20 +1099,36 @@ def generate_map(fitdatas, aligned, cfg, mapbox_key, gpx_coords=None):
   }
 
   html = [_MAP_HEAD]
-  html += [_map_legend(i, f) for i, f in enumerate(files)]
+  for i, f in enumerate(files):
+    score = gps_scores.get(f)['gps_score'] if gps_scores and f in gps_scores else None
+    html.append(_map_legend(i, f, gps_score=score))
   if cfg.draw_gpx_ref and gpx_coords:
     html.append(_map_gpx_ref_legend())
   html.append('</div>\n<script>\n')
   html.append("mapboxgl.accessToken = '%s';\n" % mapbox_key)
   html.append("var map = new mapboxgl.Map(%s);\n" % json.dumps(map_init))
   html.append(_MAP_TERRAIN)
-  html.append("map.on('load', function () {\n")
+  html.append("map.on('style.load', function () {\n")
   html += [_map_route_js(i, coords) for i, coords in enumerate(routes)]
+  if gps_scores:
+    for i, ffile in enumerate(files):
+      score = gps_scores.get(ffile)
+      if score and score['max_gap_position']:
+        fit_coords = _fit_gps_coords(aligned.frames[ffile])
+        pos = score['max_gap_position'] - 1
+        if 0 <= pos < len(fit_coords):
+          lat, lon = fit_coords[pos]
+          if pd.notna(lat) and pd.notna(lon):
+            html.append(_map_max_gap_js(i, [lon, lat]))
   if cfg.draw_gpx_ref and gpx_coords:
     # GPX points are stored as (lat, lon); the map expects [lon, lat]
     ref_coords = [[round(lon, 6), round(lat, 6)] for lat, lon in gpx_coords]
     html.append(_map_gpx_ref_js(ref_coords))
-  html.append('});\n</script>\n</body>\n</html>\n')
+  html.append('});\n')
+  html.append("document.getElementById('style-selector').addEventListener('change', function(e) {\n")
+  html.append("  map.setStyle('mapbox://styles/mapbox/' + e.target.value);\n")
+  html.append("});\n")
+  html.append('</script>\n</body>\n</html>\n')
 
   pathlib.Path(APP_PATH + "map").mkdir(exist_ok=True)
   map_file = APP_PATH + "map/" + ((cfg.project_prefix + "_map.html") if cfg.project_prefix else "map.html")
@@ -1110,7 +1164,7 @@ def generate_example_config(fitdatas, cfg, common_count):
     out.write('  altitudeGap: 8  # Seconds\n')
     out.write('  map: false\n')
     out.write('  mapStyle: outdoors-v12\n')
-    out.write('  drawGpxRef: false # Draw the --gpx-ref trace on the map (dashed black)\n')
+    out.write('  drawGpxRef: true # Draw the --gpx-ref trace on the map (dashed black)\n')
     out.write('  graphs: [\'heart_rate\', \'altitude\', \'distance\']\n')
     out.write('  includeSmoothedAlt: false\n')
     out.write('  removeAbnormalHrv: false\n')
@@ -1192,7 +1246,7 @@ def main():
 
   # Map
   if cfg.map:
-    generate_map(fitdatas, aligned, cfg, mapbox_key, gpx_coords=gpx_coords)
+    generate_map(fitdatas, aligned, cfg, mapbox_key, gpx_coords=gpx_coords, gps_scores=gps_scores)
 
 
 if __name__ == "__main__":

@@ -171,15 +171,11 @@ def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM):
   max_gap = float(max(retained))
   max_gap_position = valid_idx[int(np.argmax(retained))] + 1  # 1-based, like HR
 
-  # GPS score (cm units after the 1 m margin). The average gap drives most of the
+  # GPS score (cm units after the margin). The average gap drives most of the
   # penalty; the max gap is penalized gently so a single spike does not tank the
-  # whole score. Calibrated so a good watch trace (avg ~85 cm, max ~4 m) scores
-  # around 85%. The coefs are 1.6x the 90%-calibration: the mapping is linear
-  # (new = 100 - 1.6 * (100 - old)), so 90% -> 84% while 100% stays 100%.
-  # - average-gap penalty: 0.1 pt/cm (10 pts per metre), capped at 45
-  # - max-gap penalty:     0.006 pt/cm (0.6 pt per metre), capped at 45
-  avg_penalty = min(average_gap * 0.1, 45)
-  max_penalty = min(max_gap * 0.006, 45)
+  # whole score.
+  avg_penalty = min(average_gap * 0.05, 45)
+  max_penalty = min(max_gap * 0.008, 45)
 
   return {
     'average_gap': average_gap,
