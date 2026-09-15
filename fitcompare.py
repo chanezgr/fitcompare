@@ -1024,7 +1024,7 @@ body { font-family: 'Montserrat'; font-size: 16px; }
 }
 </style>
 <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-compare/v0.4.0/mapbox-gl-compare.css" type="text/css"></head><body>
-<br><br><div align="center" style="width: 1800px; height: 900px; padding-left: 30px;">
+<br><br><div align="center" style="width: 1400px; height: 750px; padding-left: 30px;">
 <select id="style-selector" class="style-selector">
     <option value="satellite-streets-v12">Satellite Streets</option>
     <option value="streets-v12">Streets</option>
@@ -1032,7 +1032,7 @@ body { font-family: 'Montserrat'; font-size: 16px; }
     <option value="light-v11">Light</option>
     <option value="dark-v11">Dark</option>
 </select>
-<div align="center" id="mapid" style="width: 100%; height: 900px;"></div>
+<div align="center" id="mapid" style="width: 100%; height: 750px;"></div>
 <div align="left">
 """
 
