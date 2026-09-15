@@ -14,4 +14,6 @@ COPY fitcompare.py /app
 COPY fitcompare_advanced.py /app
 COPY config.ini /app
 
+COPY refs_gpx/* /gpx/
+
 ENTRYPOINT ["python", "-u", "fitcompare.py"]

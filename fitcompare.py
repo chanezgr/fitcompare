@@ -53,9 +53,8 @@ from fitcompare_advanced import compute_hr_score, compute_gps_score
 SCRIPT_VER = "3.1.0"
 # CHANGELOG:
 # 3.1.0: Add --gpx-ref / -G: an absolute GPX trace used as GPS reference for the
-#        FIT files. Each FIT GPS point is matched to the nearest GPX point, a
-#        1 m tolerance is applied (retained gap = max(0, dist_cm - 100)), and a
-#        GPS score (mirroring the HR score) plus per-point cm deviation and the
+#        FIT files. Each FIT GPS point is matched to the nearest GPX point and a
+#        GPS score is computed (mirroring the HR score) plus per-point cm deviation and the
 #        max deviation are reported and plotted.
 # 3.0.0: Entire cide refactoring, replacing spaghetti code
 #        Improvement: single FIT parse, full pandas-backed data model
@@ -627,8 +626,8 @@ def load_fit_hrv(ffile, cfg, delta):
 # GPS REFERENCE (GPX)
 
 def load_gpx(gpx_file):
-  """Parse a GPX file and return its track points as a list of (lat_deg, lon_deg)."""
-  tree = ET.parse(APP_PATH + gpx_file)
+  """Parse a GPX file and return its track points and tolerance."""
+  tree = ET.parse("/gpx/" + gpx_file)
   root = tree.getroot()
   # GPX elements are namespaced; iterate namespace-agnostically on 'trkpt'.
   ns = ''
@@ -640,7 +639,17 @@ def load_gpx(gpx_file):
     lon = pt.get('lon')
     if lat is not None and lon is not None:
       coords.append((float(lat), float(lon)))
-  return coords
+
+  # Extract tolerance from <fitcompare_data><tolerance>
+  tolerance = None
+  for elem in root.iter():
+    if elem.tag.endswith('}tolerance') or elem.tag == 'tolerance':
+      try:
+        tolerance = float(elem.text)
+        break
+      except (ValueError, TypeError):
+        continue
+  return coords, tolerance
 
 
 def _fit_gps_coords(frame):
@@ -660,12 +669,18 @@ def _fit_gps_coords(frame):
   return coords
 
 
-def compute_gps_scores(fitdatas, aligned, cfg, gpx_coords):
+def compute_gps_scores(fitdatas, aligned, cfg, gpx_coords, gpx_tol=None):
   """Compute the GPS score of every FIT file against the GPX reference trace."""
   scores = {}
+  # Use GPX tolerance if available, otherwise let compute_gps_score use its default
+  margin_cm = (gpx_tol * 100.0) if gpx_tol is not None else None
+
   for ffile in fitdatas:
     fit_coords = _fit_gps_coords(aligned.frames[ffile])
-    score = compute_gps_score(fit_coords, gpx_coords)
+    if margin_cm is not None:
+      score = compute_gps_score(fit_coords, gpx_coords, margin_cm=margin_cm)
+    else:
+      score = compute_gps_score(fit_coords, gpx_coords)
     if score is None:
       print("GPS Score: %s has no usable GPS fix (skipped)" % ffile)
       continue
@@ -1036,9 +1051,12 @@ map.addControl(new mapboxgl.FullscreenControl());
 """
 
 
-def _map_legend(index, ffile, gps_score=None):
+def _map_legend(index, ffile, gps_score_data=None):
   tags = decode_fit_name(ffile)
-  score_str = " - Score GPS: %.1f%%" % gps_score if gps_score is not None else ""
+  score_str = ""
+  if gps_score_data:
+    score_str = " - Score GPS: %.1f%% (Moy: %.1fcm, Max: %.1fcm)" % (
+      gps_score_data['gps_score'], gps_score_data['average_gap'], gps_score_data['max_gap'])
   return ('<div class="mapLegend" align="left" style="margin-right: 8px; padding-left: 70px;">'
           '<font color="%s">&#9679;</font>%s (Mode GNSS: %s%s)</div>\n'
           % (GPX_COLORS[index], tags[0], tags[2], score_str))
@@ -1100,8 +1118,8 @@ def generate_map(fitdatas, aligned, cfg, mapbox_key, gpx_coords=None, gps_scores
 
   html = [_MAP_HEAD]
   for i, f in enumerate(files):
-    score = gps_scores.get(f)['gps_score'] if gps_scores and f in gps_scores else None
-    html.append(_map_legend(i, f, gps_score=score))
+    score_data = gps_scores.get(f) if gps_scores else None
+    html.append(_map_legend(i, f, gps_score_data=score_data))
   if cfg.draw_gpx_ref and gpx_coords:
     html.append(_map_gpx_ref_legend())
   html.append('</div>\n<script>\n')
@@ -1220,10 +1238,10 @@ def main():
   gps_scores = None
   gpx_coords = None
   if cfg.gpx_ref:
-    gpx_coords = load_gpx(cfg.gpx_ref)
+    gpx_coords, gpx_tol = load_gpx(cfg.gpx_ref)
     cfg.dbg("GPX reference trace loaded with %i points" % len(gpx_coords))
     if gpx_coords:
-      gps_scores = compute_gps_scores(fitdatas, aligned, cfg, gpx_coords)
+      gps_scores = compute_gps_scores(fitdatas, aligned, cfg, gpx_coords, gpx_tol)
     else:
       print("WARNING: GPX reference file %s contains no track points" % cfg.gpx_ref)
 

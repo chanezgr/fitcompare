@@ -24,8 +24,8 @@ from scipy.spatial import cKDTree
 
 # Mean Earth radius used for the equirectangular projection (meters)
 EARTH_RADIUS_M = 6371000.0
-# Free GPS tolerance: the first 112cm of every point-to-point gap is ignored
-GPS_MARGIN_CM = 112.0
+# Free GPS tolerance: the first 500cm of every point-to-point gap is ignored
+GPS_MARGIN_CM = 500.0
 
 
 def _nearest_value(window, value):
@@ -122,9 +122,9 @@ def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM):
       with no fix are represented by (nan, nan) and are skipped.
   gpx_coords : sequence of (lat_deg, lon_deg)
       Every track point of the GPX reference trace.
-  margin_cm : float
-      Free tolerance applied per point: retained_gap = max(0, dist_cm - margin).
-      Defaults to 112cm which is one meter at the max 50cm of the nearest point
+    margin_cm : float
+       Free tolerance applied per point: retained_gap = max(0, dist_cm - margin).
+       Defaults to 500cm.
 
   Returns
   -------
