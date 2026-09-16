@@ -798,8 +798,8 @@ def build_report(fitdatas, cfg, alt_norms, gps_scores=None):
       out.append(" GPS ecart moyen / max:        %.1f cm / %.1f cm @ point %i\n"
                  % (gs['average_gap'], gs['max_gap'], gs['max_gap_position']))
       if gs.get('real_dist') is not None:
-        out.append(" GPS distance:                 %.2f m / %.2f m (ref)\n"
-                   % (gs['measured_dist'], gs['real_dist']))
+        out.append(" GPS distance:                 %.2f m / %.2f m (ref) (%.2f%%)\n"
+                   % (gs['measured_dist'], gs['real_dist'], gs.get('dist_error_pct', 0)))
     out.append("=========================================================================\n\n")
 
   out.extend(_build_project_report(fitdatas, cfg))
@@ -1080,7 +1080,7 @@ def _map_legend(index, ffile, gps_score_data=None):
   if gps_score_data:
     dist_str = ""
     if gps_score_data.get('real_dist') is not None:
-      dist_str = " - Dist: %.1fm/%.1fm" % (gps_score_data['measured_dist'], gps_score_data['real_dist'])
+      dist_str = " - Dist: %.1fm/%.1fm (%.1f%%)" % (gps_score_data['measured_dist'], gps_score_data['real_dist'], gps_score_data.get('dist_error_pct', 0))
     score_str = " - Score GPS: %.1f%% (Moy: %.1fcm, Max: %.1fcm)%s" % (
       gps_score_data['gps_score'], gps_score_data['average_gap'], gps_score_data['max_gap'], dist_str)
   return ('<div class="mapLegend" align="left" style="margin-right: 8px; padding-left: 70px;">'
