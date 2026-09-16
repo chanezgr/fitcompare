@@ -426,7 +426,6 @@ def _build_summary(fitfile, df, raw_first_ts, cfg, ffile):
     avg_long=avg_long,
     start_alt=start_alt,
     end_alt=end_alt,
-    lap_count=_load_laps(fitfile),
   )
 
 

@@ -3,7 +3,7 @@
   <metadata>
     <extensions>
       <fitcompare_data>
-        <total_distance>400.16</total_distance>
+        <total_distance>400</total_distance>
         <max_gap>0.498</max_gap>
         <avg_precision>0.007</avg_precision>
         <max_precision>0.032</max_precision>
