@@ -192,7 +192,7 @@ def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM, measured_
     actual_total_dist = real_dist * laps
     diff_pct = abs(measured_dist - actual_total_dist) / actual_total_dist
     if diff_pct > 0.01:
-      dist_penalty = min((diff_pct - 0.01) * 100 * 2, 20)
+      dist_penalty = min((diff_pct - 0.01) * 800, 40)
   
   return {
     'average_gap': average_gap,
