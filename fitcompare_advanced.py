@@ -182,8 +182,8 @@ def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM, measured_
   # GPS score (cm units after the margin). The average gap drives most of the
   # penalty; the max gap is penalized gently so a single spike does not tank the
   # whole score.
-  avg_penalty = min(average_gap * 0.05, 45)
-  max_penalty = min(max_gap * 0.008, 45)
+  avg_penalty = min(average_gap * 0.06, 40)
+  max_penalty = min(max_gap * 0.009, 40)
   
   # Distance penalty
   dist_penalty = 0
@@ -192,7 +192,7 @@ def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM, measured_
     actual_total_dist = real_dist * laps
     diff_pct = abs(measured_dist - actual_total_dist) / actual_total_dist
     if diff_pct > 0.01:
-      dist_penalty = min((diff_pct - 0.01) * 800, 40)
+      dist_penalty = min((diff_pct - 0.01) * 400, 35)
   
   return {
     'average_gap': average_gap,
