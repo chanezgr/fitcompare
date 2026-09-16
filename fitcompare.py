@@ -426,6 +426,7 @@ def _build_summary(fitfile, df, raw_first_ts, cfg, ffile):
     avg_long=avg_long,
     start_alt=start_alt,
     end_alt=end_alt,
+    lap_count=_load_laps(fitfile),
   )
 
 
@@ -640,8 +641,9 @@ def load_gpx(gpx_file):
     if lat is not None and lon is not None:
       coords.append((float(lat), float(lon)))
 
-  # Extract tolerance from <fitcompare_data><tolerance>
+  # Extract tolerance and total distance from <fitcompare_data>
   tolerance = None
+  total_distance = None
   for elem in root.iter():
     if elem.tag.endswith('}tolerance') or elem.tag == 'tolerance':
       try:
@@ -649,7 +651,15 @@ def load_gpx(gpx_file):
         break
       except (ValueError, TypeError):
         continue
-  return coords, tolerance
+  
+  for elem in root.iter():
+    if elem.tag.endswith('}total_distance') or elem.tag == 'total_distance':
+      try:
+        total_distance = float(elem.text)
+        break
+      except (ValueError, TypeError):
+        continue
+  return coords, tolerance, total_distance
 
 
 def _fit_gps_coords(frame):
@@ -669,18 +679,29 @@ def _fit_gps_coords(frame):
   return coords
 
 
-def compute_gps_scores(fitdatas, aligned, cfg, gpx_coords, gpx_tol=None):
+def compute_gps_scores(fitdatas, aligned, cfg, gpx_coords, gpx_tol=None, gpx_dist=None):
   """Compute the GPS score of every FIT file against the GPX reference trace."""
   scores = {}
   # Use GPX tolerance if available, otherwise let compute_gps_score use its default
   margin_cm = (gpx_tol * 100.0) if gpx_tol is not None else None
-
+  
   for ffile in fitdatas:
     fit_coords = _fit_gps_coords(aligned.frames[ffile])
+    fit_dist = fitdatas[ffile].summary.total_distance
+    
+    # Estimate lap count based on distance if reference distance is available
+    laps = 1
+    if gpx_dist and fit_dist:
+      laps = round(fit_dist / gpx_dist)
+      if laps < 1:
+        laps = 1
+    
     if margin_cm is not None:
-      score = compute_gps_score(fit_coords, gpx_coords, margin_cm=margin_cm)
+      score = compute_gps_score(fit_coords, gpx_coords, margin_cm=margin_cm, 
+                               measured_dist=fit_dist, real_dist=gpx_dist, laps=laps)
     else:
-      score = compute_gps_score(fit_coords, gpx_coords)
+      score = compute_gps_score(fit_coords, gpx_coords, 
+                               measured_dist=fit_dist, real_dist=gpx_dist, laps=laps)
     if score is None:
       print("GPS Score: %s has no usable GPS fix (skipped)" % ffile)
       continue
@@ -777,6 +798,9 @@ def build_report(fitdatas, cfg, alt_norms, gps_scores=None):
       out.append(" GPS score (vs GPX ref):       %.1f%%\n" % gs['gps_score'])
       out.append(" GPS ecart moyen / max:        %.1f cm / %.1f cm @ point %i\n"
                  % (gs['average_gap'], gs['max_gap'], gs['max_gap_position']))
+      if gs.get('real_dist') is not None:
+        out.append(" GPS distance:                 %.2f m / %.2f m (ref)\n"
+                   % (gs['measured_dist'], gs['real_dist']))
     out.append("=========================================================================\n\n")
 
   out.extend(_build_project_report(fitdatas, cfg))
@@ -1055,8 +1079,11 @@ def _map_legend(index, ffile, gps_score_data=None):
   tags = decode_fit_name(ffile)
   score_str = ""
   if gps_score_data:
-    score_str = " - Score GPS: %.1f%% (Moy: %.1fcm, Max: %.1fcm)" % (
-      gps_score_data['gps_score'], gps_score_data['average_gap'], gps_score_data['max_gap'])
+    dist_str = ""
+    if gps_score_data.get('real_dist') is not None:
+      dist_str = " - Dist: %.1fm/%.1fm" % (gps_score_data['measured_dist'], gps_score_data['real_dist'])
+    score_str = " - Score GPS: %.1f%% (Moy: %.1fcm, Max: %.1fcm)%s" % (
+      gps_score_data['gps_score'], gps_score_data['average_gap'], gps_score_data['max_gap'], dist_str)
   return ('<div class="mapLegend" align="left" style="margin-right: 8px; padding-left: 70px;">'
           '<font color="%s">&#9679;</font>%s (Mode GNSS: %s%s)</div>\n'
           % (GPX_COLORS[index], tags[0], tags[2], score_str))
@@ -1238,10 +1265,10 @@ def main():
   gps_scores = None
   gpx_coords = None
   if cfg.gpx_ref:
-    gpx_coords, gpx_tol = load_gpx(cfg.gpx_ref)
-    cfg.dbg("GPX reference trace loaded with %i points" % len(gpx_coords))
+    gpx_coords, gpx_tol, gpx_dist = load_gpx(cfg.gpx_ref)
+    cfg.dbg("GPX reference trace loaded with %i points and distance %.2f" % (len(gpx_coords), gpx_dist if gpx_dist else 0))
     if gpx_coords:
-      gps_scores = compute_gps_scores(fitdatas, aligned, cfg, gpx_coords, gpx_tol)
+      gps_scores = compute_gps_scores(fitdatas, aligned, cfg, gpx_coords, gpx_tol, gpx_dist)
     else:
       print("WARNING: GPX reference file %s contains no track points" % cfg.gpx_ref)
 

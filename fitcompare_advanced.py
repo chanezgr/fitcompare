@@ -111,9 +111,9 @@ def _to_xy(coords, lat0_rad):
   return np.column_stack([x, y])
 
 
-def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM):
+def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM, measured_dist=None, real_dist=None, laps=1):
   """Compute the GPS comparison score of a FIT trace against a GPX reference.
-
+  
   Parameters
   ----------
   fit_coords : sequence of (lat_deg, lon_deg)
@@ -125,38 +125,46 @@ def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM):
     margin_cm : float
        Free tolerance applied per point: retained_gap = max(0, dist_cm - margin).
        Defaults to 500cm.
-
+    measured_dist : float
+       Total distance measured by the device (m).
+    real_dist : float
+       Total distance of one loop of the reference GPX (m).
+    laps : int
+       Number of loops performed.
+  
   Returns
   -------
   dict or None
       ``None`` if the FIT file has no usable fix or the GPX trace is empty,
       otherwise a dict with keys:
-
+  
       * ``average_gap``  - mean of the retained gaps (cm)
       * ``max_gap``      - largest retained gap (cm)
       * ``max_gap_position`` - 1-based index of the largest gap in ``gaps``
       * ``gps_score``    - score on 100 (100 = perfect)
       * ``gaps``         - per-point retained gaps (cm), NaN where no fix
       * ``raw_dists``    - per-point raw distances (cm) to the nearest GPX pt
+      * ``measured_dist`` - measured distance (m)
+      * ``real_dist``     - actual total reference distance (m)
   """
   n = len(fit_coords)
   gaps = [float('nan')] * n
   raw_dists = [float('nan')] * n
-
+  
   valid_idx = [i for i, c in enumerate(fit_coords)
-              if c is not None and len(c) == 2
-              and c[0] == c[0] and c[1] == c[1]   # not NaN
-              and c[0] != 0.0 and c[1] != 0.0]
+               if c is not None and len(c) == 2
+               and c[0] == c[0] and c[1] == c[1]   # not NaN
+               and c[0] != 0.0 and c[1] != 0.0]
   if not valid_idx or len(gpx_coords) == 0:
     return None
-
+  
   gpx = np.asarray(gpx_coords, dtype=float)
   fit_valid = np.asarray([fit_coords[i] for i in valid_idx], dtype=float)
   lat0 = math.radians(float(np.mean(gpx[:, 0])))
   tree = cKDTree(_to_xy(gpx, lat0))
   dists_m, _ = tree.query(_to_xy(fit_valid, lat0))
   dists_cm = dists_m * 100.0
-
+  
   retained = []
   for k, i in enumerate(valid_idx):
     cm = float(dists_cm[k])
@@ -166,22 +174,33 @@ def compute_gps_score(fit_coords, gpx_coords, margin_cm=GPS_MARGIN_CM):
       gap = 0.0
     gaps[i] = gap
     retained.append(gap)
-
+  
   average_gap = float(sum(retained) / len(retained))
   max_gap = float(max(retained))
   max_gap_position = valid_idx[int(np.argmax(retained))] + 1  # 1-based, like HR
-
+  
   # GPS score (cm units after the margin). The average gap drives most of the
   # penalty; the max gap is penalized gently so a single spike does not tank the
   # whole score.
   avg_penalty = min(average_gap * 0.05, 45)
   max_penalty = min(max_gap * 0.008, 45)
-
+  
+  # Distance penalty
+  dist_penalty = 0
+  actual_total_dist = None
+  if real_dist is not None and measured_dist is not None:
+    actual_total_dist = real_dist * laps
+    diff_pct = abs(measured_dist - actual_total_dist) / actual_total_dist
+    if diff_pct > 0.01:
+      dist_penalty = min((diff_pct - 0.01) * 100 * 2, 20)
+  
   return {
     'average_gap': average_gap,
     'max_gap': max_gap,
     'max_gap_position': max_gap_position,
-    'gps_score': 100 - (avg_penalty + max_penalty),
+    'gps_score': 100 - (avg_penalty + max_penalty + dist_penalty),
     'gaps': gaps,
     'raw_dists': raw_dists,
+    'measured_dist': measured_dist,
+    'real_dist': actual_total_dist,
   }
