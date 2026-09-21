@@ -136,7 +136,7 @@ class Config:
 
 def parse_args():
   parser = argparse.ArgumentParser(description='Compare two or more FIT files')
-  parser.add_argument('fitfilesarg', metavar='FITFILE', nargs='+', help='Fit Files to compare')
+  parser.add_argument('fitfilesarg', metavar='FITFILE', nargs='*', help='Fit Files to compare')
   parser.add_argument('--reference-file', '-r', dest='reference_file', help='Set the reference FIT File')
   parser.add_argument('--gpx-ref', '-G', dest='gpx_ref',
                       help='GPX file used as absolute GPS reference for the FIT files')
@@ -147,6 +147,7 @@ def parse_args():
   parser.add_argument('--listfields', '-l', action='store_true', help='List all fields for FITFILE')
   parser.add_argument('--gen-config', '-g', dest='gen_config', action='store_true',
                       help='Generate an example project.yaml.example from the FIT files, then exit')
+  parser.add_argument('--redo', action='store_true', help='Relaunch with the same parameters as the last run')
   return parser.parse_args()
 
 
@@ -856,8 +857,7 @@ def _render_chart(chart_data, chart_title, graph_file, cfg, max_points, vlines=N
   frame = pd.DataFrame(chart_data)
   if cfg.export:
     frame.to_csv(graph_file + '.csv', sep=',', decimal='.')
-  sns.set_theme(font='Montserrat')
-  sns.set(rc={'figure.figsize': (20, 10)})
+  _set_chart_style()
   sns.lineplot(x=None, y=None, data=frame, linewidth=1, dashes=False).set(
     title=chart_title, xlim=(-5, max_points + 5))
   plt.grid(True)
@@ -930,6 +930,52 @@ def _legend_for(compare_value, ffile, fitdatas, cfg, values, aligned, hr_max_pos
   return "%s" % tags[0]
 
 
+def _set_chart_style(figsize=(20, 10)):
+  """Apply a consistent style and figure size to all charts."""
+  sns.set_theme()
+  sns.set(rc={'figure.figsize': figsize})
+
+def generate_hr_regression_graph(aligned, fitdatas, cfg):
+  """Generate a scatter plot with regression line for HR vs reference file."""
+  print("Generating HR regression plot")
+  ref_file = cfg.reference_file
+  ref_hr = field_values(aligned.frames[ref_file], 'heart_rate', cfg, aligned.max_points)
+  
+  _set_chart_style(figsize=(10, 10))
+  
+  has_data = False
+  for ffile in fitdatas:
+    if ffile == ref_file:
+      continue
+    cand_hr = field_values(aligned.frames[ffile], 'heart_rate', cfg, aligned.max_points)
+    
+    df = pd.DataFrame({'ref': ref_hr, 'cand': cand_hr})
+    df = df[(df['ref'] > 0) & (df['cand'] > 0)]
+    
+    if df.empty:
+      continue
+    
+    has_data = True
+    tags = decode_fit_name(ffile)
+    sns.regplot(x='ref', y='cand', data=df, label=tags[0], 
+                scatter_kws={'s': 2, 'alpha': 0.3}, line_kws={'linewidth': 2})
+  
+  if not has_data:
+    print("No usable HR data for regression plot")
+    plt.clf()
+    return
+
+  plt.title("Corrélation de la fréquence cardiaque vs Référence")
+  plt.xlabel("Fréquence cardiaque de référence (bpm)")
+  plt.ylabel("Fréquence cardiaque mesurée (bpm)")
+  plt.legend()
+  plt.grid(True)
+  
+  graph_file = _graph_path('hr_regression', cfg)
+  plt.savefig(graph_file + '.png', bbox_inches='tight', pad_inches=0.3)
+  plt.clf()
+  
+  
 def generate_standard_graph(compare_value, aligned, fitdatas, cfg, alt_norms):
   """Build and render one of the configured comparison graphs."""
   print("Generating data for %s" % compare_value)
@@ -1232,6 +1278,23 @@ def generate_example_config(fitdatas, cfg, common_count):
 # #############################
 # MAIN
 
+def save_last_run(args):
+  """Save the current CLI arguments to a hidden JSON file."""
+  last_run_file = APP_PATH + '.fitcompare.last'
+  # Convert Namespace to dict and remove 'redo' to avoid infinite loop/noise
+  args_dict = vars(args).copy()
+  args_dict.pop('redo', None)
+  with open(last_run_file, 'w') as f:
+    json.dump(args_dict, f)
+
+def load_last_run():
+  """Load CLI arguments from the hidden JSON file."""
+  last_run_file = APP_PATH + '.fitcompare.last'
+  if os.path.isfile(last_run_file):
+    with open(last_run_file, 'r') as f:
+      return json.load(f)
+  return None
+
 def main():
   print("Running fitcompare v%s" % SCRIPT_VER)
 
@@ -1239,7 +1302,21 @@ def main():
   global_conf.read('config.ini')
   mapbox_key = global_conf['map']['mapbox_api_key']
 
-  cfg = load_config(parse_args())
+  args = parse_args()
+  if args.redo:
+    last_args = load_last_run()
+    if last_args:
+      print("[info] Relaunching with parameters from last run")
+      # Update args namespace with saved values
+      for key, value in last_args.items():
+        setattr(args, key, value)
+    else:
+      print("ERROR: No .fitcompare.last file found. Cannot redo.")
+      sys.exit(1)
+  elif not args.gen_config:
+    save_last_run(args)
+
+  cfg = load_config(args)
 
   # Parse every FIT file exactly once
   fitdatas = {}
@@ -1284,6 +1361,10 @@ def main():
   for compare_value in cfg.values_to_compare:
     cfg.dbg("Configuring output for field %s" % compare_value)
     generate_standard_graph(compare_value, aligned, fitdatas, cfg, alt_norms)
+  
+  if cfg.with_reference_file:
+    generate_hr_regression_graph(aligned, fitdatas, cfg)
+
   generate_custom_graphs(aligned, fitdatas, cfg)
   if gps_scores:
     generate_gps_graph(gps_scores, aligned, fitdatas, cfg)
