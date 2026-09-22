@@ -958,12 +958,19 @@ def generate_hr_regression_graph(aligned, fitdatas, cfg):
     has_data = True
     tags = decode_fit_name(ffile)
     sns.regplot(x='ref', y='cand', data=df, label=tags[0], 
-                scatter_kws={'s': 2, 'alpha': 0.3}, line_kws={'linewidth': 2})
+                scatter_kws={'s': 15, 'alpha': 0.3}, line_kws={'linewidth': 2})
   
   if not has_data:
     print("No usable HR data for regression plot")
     plt.clf()
     return
+
+  # Reference line y = x
+  plt.plot(ref_hr, ref_hr, color='red', linestyle='--', label='Référence (y = x)')
+  
+  # Copyright watermark
+  plt.figtext(x=0.95, y=0.05, s='© nakan.ch', ha='right', va='bottom', 
+              fontsize=10, color='gray')
 
   plt.title("Corrélation de la fréquence cardiaque vs Référence")
   plt.xlabel("Fréquence cardiaque de référence (bpm)")
@@ -974,6 +981,7 @@ def generate_hr_regression_graph(aligned, fitdatas, cfg):
   graph_file = _graph_path('hr_regression', cfg)
   plt.savefig(graph_file + '.png', bbox_inches='tight', pad_inches=0.3)
   plt.clf()
+
   
   
 def generate_standard_graph(compare_value, aligned, fitdatas, cfg, alt_norms):
